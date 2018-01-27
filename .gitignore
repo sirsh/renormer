@@ -1,0 +1,9 @@
+*.ipynb_checkpoints
+*.egg-info
+*.pyc 
+*.bat
+sample_data
+build
+dist
+logs
+
