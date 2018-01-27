@@ -283,12 +283,14 @@ class compound_interaction(object):
         l,r = np.array(l),np.array(r)
         l_,r_ = l[:,0],r[:,1] #left internal, #right internal
         s,e = l[:,1], r[:,0] #left external, #right external
-        binding = np.array([l_,r_]) #internal nodes
-        pairings = binding.min(0) #per species possibles
+        binding = np.array([l_,r_]).T
+        pairings = np.array([binding.min(1),binding.min(1)]).T 
+        binding, pairings
         residual = binding - pairings #what is left over after binding to add to externals
         has_pairings = (pairings>0).astype(int) #mask
         multiplicity = l_ * has_pairings #left internal used for symmetry factor (for all species)
-        return np.array([l[:,1], r[:,0]]).T + residual.T, multiplicity.sum()
+        res = np.stack([e,s]).T + residual
+        return res, multiplicity.sum()
         
     @property
     def symmetry_factor(self): return self._symmetry_factor * self._child_syms * self._external_sym_factors
