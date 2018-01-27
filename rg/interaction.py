@@ -80,7 +80,7 @@ class interaction(object):
     def __eq__(self,other): return np.array_equal(self._mat, other._mat)
     
     def __and__(self,other):
-        c = compound_interaction(other,self)
+        c = compound_interaction(self,other)
         print("symmetry factor:",c.symmetry_factor)
         return c.effective_interaction
         
@@ -260,6 +260,7 @@ class compound_interaction(object):
         self.left,self.right = nodea,nodeb
         self._symmetry_factor = 1
         self._child_syms = 1
+        self.loops = 0
         if isinstance(nodea, compound_interaction):
             self._left = nodea
             self._right = nodeb
@@ -272,25 +273,26 @@ class compound_interaction(object):
         self._external_sym_factors = factorial(left_external, exact=True).prod()
         
         
-    def __merge__(self, interaction_r, interaction_l):
+    def __merge__(self, interaction_l, interaction_r):
         left = interaction_l._mat
         right = interaction_r._mat
         self._symmetry_factor = 1
-        residual, self._symmetry_factor = compound_interaction.pair_matrices(right,left)
+        residual, self._symmetry_factor, pairings = compound_interaction.pair_matrices(left, right)
+        if pairings.sum() > 2: self.loops += 1#i think?
         return residual
         
-    def pair_matrices(r,l):
+    def pair_matrices(l,r):
         l,r = np.array(l),np.array(r)
         l_,r_ = l[:,0],r[:,1] #left internal, #right internal
         s,e = l[:,1], r[:,0] #left external, #right external
         binding = np.array([l_,r_]).T
         pairings = np.array([binding.min(1),binding.min(1)]).T 
-        binding, pairings
+        binding, pairings       
         residual = binding - pairings #what is left over after binding to add to externals
         has_pairings = (pairings>0).astype(int) #mask
         multiplicity = l_ * has_pairings #left internal used for symmetry factor (for all species)
         res = np.stack([e,s]).T + residual
-        return res, multiplicity.sum()
+        return res, multiplicity.sum(), pairings
         
     @property
     def symmetry_factor(self): return self._symmetry_factor * self._child_syms * self._external_sym_factors
@@ -298,13 +300,19 @@ class compound_interaction(object):
     @property
     def effective_interaction(self):  return interaction(self._effective)
     
-    def _repr_html_(self):  return diagrams.diagram(self.effective_interaction)._repr_html_()
+    def _repr_html_(self):  
+        r = 4 if self.loops == 1 else 2
+        return diagrams.diagram(self.effective_interaction, props={"loop_radius" : r})._repr_html_()
     
     def display_construction(self): pass
     
     
-    
-    
+    def combination_iterator(self, primitives, order = 0, max_k=3):
+        # primitives choose k increasing
+        #reduce them
+        #foreach graph in reduction, if effetively in primitives and order == whatever yield
+        pass
+        
     
     
     

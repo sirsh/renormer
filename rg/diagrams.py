@@ -31,6 +31,8 @@ class diagram(HTML):
         arr = np.array(species_matrix)
         self.center = (80,50)
         self.legs = []
+        self.loop_radius = 2
+        if "loop_radius" in props: self.loop_radius = props["loop_radius"]
         
         ins_, outs_ = list(arr[:,0]), list(arr[:,1])
         ispec,ospec = [], []
@@ -84,8 +86,8 @@ class diagram(HTML):
       <g fill="none" stroke="black" stroke-width="1.6" stroke-linecap="round">
         {2}
       </g>
-      <circle cx="{0}" cy="{1}" r="2" stroke="black" stroke-width="1" fill="black" />
-    </svg>""".format(self.center[0], self.center[1], self._leg_repr_())
+      <circle cx="{0}" cy="{1}" r="{3}" stroke="black" stroke-width="1" fill="black" />
+    </svg>""".format(self.center[0], self.center[1], self._leg_repr_(),self.loop_radius)
     
     def _repr_html_(self): 
         return str(self)
