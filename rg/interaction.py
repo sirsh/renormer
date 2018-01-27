@@ -28,6 +28,7 @@ T = Symbol("T")
 L = Symbol("L")
 INV_MEASURE = 1/ ( T * (L**dim))
 
+
 def __display_all_(interactions, show_mat=False):
     return [d.display(show_mat) for d in interactions]
 
@@ -35,6 +36,13 @@ def __display_all_(interactions, show_mat=False):
 #     def __init__(self, *args):
 #         list.__init__(self, *args)
         
+class _interaction_identity(object):
+    def __and__(self,other):  return other
+    def __add__(self,other): return other
+    #def __sub__(self,other): return other
+    
+interaction_identity = _interaction_identity()
+
 #add sympy and see what we can do with it
 #must generate symbols for the fields
 #assumed all fields can be equated to the inverse time-space measure because [L][D]=1
@@ -44,6 +52,7 @@ class interaction(object):
     def __init__(self, mat, coupling_symbol=None):
         self._mat = mat
         self.shifted=True
+        self.symmetry_factor = 1#not sure if this is the one for the externals??
             
         self.in_fields = []
         self.out_fields = []
@@ -80,6 +89,7 @@ class interaction(object):
     def __eq__(self,other): return np.array_equal(self._mat, other._mat)
     
     def __and__(self,other):
+        if isinstance(other,_interaction_identity):return self
         c = compound_interaction(self,other)
         print("symmetry factor:",c.symmetry_factor)
         return c.effective_interaction
@@ -261,17 +271,14 @@ class compound_interaction(object):
         self._symmetry_factor = 1
         self._child_syms = 1
         self.loops = 0
-        if isinstance(nodea, compound_interaction):
-            self._left = nodea
-            self._right = nodeb
-            self._effective = self.__merge__(nodea.effective_interaction, nodeb.effective_interaction)
-            self._child_syms = nodea.symmetry_factor * nodeb.symmetry_factor
-        else: self._effective = self.__merge__(self.left,self.right)#
+        if isinstance(nodeb, compound_interaction):  self.right = nodeb.effective_interaction
+        if isinstance(nodea, compound_interaction):  self.left = nodea.effective_interaction
+        self._child_syms = nodea.symmetry_factor * nodeb.symmetry_factor
+        self._effective = self.__merge__(self.left,self.right)#
         self._external_sym_factors = 1 # this one is determine by each species external choices
         #foreach OUT species add power!
         left_external = self._effective[:,1]
         self._external_sym_factors = factorial(left_external, exact=True).prod()
-        
         
     def __merge__(self, interaction_l, interaction_r):
         left = interaction_l._mat
@@ -301,21 +308,34 @@ class compound_interaction(object):
     def effective_interaction(self):  return interaction(self._effective)
     
     def _repr_html_(self):  
-        r = 4 if self.loops == 1 else 2
+        r = 4 if self.loops == 1 else 2#hard code to make it loopy for now
         return diagrams.diagram(self.effective_interaction, props={"loop_radius" : r})._repr_html_()
     
     def display_construction(self): pass
     
-    
-    def combination_iterator(self, primitives, order = 0, max_k=3):
-        # primitives choose k increasing
-        #reduce them
-        #foreach graph in reduction, if effetively in primitives and order == whatever yield
-        pass
+    def combinations(primitives, loop_orders = [0], max_k=3):
+        if not isinstance(loop_orders, list):loop_orders = [loop_orders]
+        l = []   
+        for i in range(2,max_k+1):
+            for tup in list(itertools.permutations(primitives,i)):
+                res = compound_interaction._combine(list(tup))
+                if res.effective_interaction in primitives and res.loops in loop_orders: l.append(res)
+        #todo: define uniquness for compound_interaction set
+        return list(set(l))
         
+    def _combine(set_of_interactions):
+        def _merge(a,b): 
+            if isinstance(a, _interaction_identity):return b
+            if isinstance(b, _interaction_identity):return a
+            return compound_interaction(a,b)
+        return functools.reduce(_merge, set_of_interactions, interaction_identity)
     
     
-    
+    #this entire method of combinations needs to improve 
+    #- we need to generalise between interactrions and compund interactions so they are more like the same thing with the same operations
+    #and they should in general be renormalised. The way I have done it here i have sort of tacked it on
+    #the way forward is obvious. just remember symmetry factors and loops and add this bominer stuff to the boolean operators
+    #uniqueness then defined for the matrix plus the symmetry factors ?? hmmmm - maybe that is a good reason to keep them as seperate things    
     
     
     
