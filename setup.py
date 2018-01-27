@@ -8,7 +8,7 @@ setup(
     author='Sirsh',
     author_email='amartey@gmail.com',
     license='MIT',
-    url='git@github.com:mrsirsh/renormer.git',
+    url='git@github.com:sirsh/renormer.git',
     keywords='RG, python',
     description='renormer description',
     long_description=('renormer description'),
