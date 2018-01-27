@@ -1,0 +1,6 @@
+{
+    "species" : [  
+        {"Name" : "A", "ShortName" : "A", "Colour" : "Red",  "Style" : "Boson", "Label" : "\phi" },
+        {"Name" : "B", "ShortName" : "B", "Colour" : "Black", "Style" : "",     "Label" : "\psi" },
+     ]
+}
