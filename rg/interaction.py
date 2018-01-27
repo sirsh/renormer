@@ -6,6 +6,7 @@ import operator
 import functools
 import itertools
 import warnings
+from scipy.special import factorial
 warnings.filterwarnings("ignore")
 #later come back and test all the ops without this and clean up
 
@@ -92,6 +93,11 @@ class interaction(object):
         a = np.array(self._mat)- np.array(other._mat)
         #a[a < 0] = 0
         return interaction(a)
+    
+    @property
+    def symmetries(self):
+        left_external = np.array(self._mat)[:,1]
+        return factorial(left_external, exact=True).prod()
     
     @property
     def diagram(self):  return diagrams.diagram(self)
@@ -259,7 +265,12 @@ class compound_interaction(object):
             self._right = nodeb
             self._effective = self.__merge__(nodea.effective_interaction, nodeb.effective_interaction)
             self._child_syms = nodea.symmetry_factor * nodeb.symmetry_factor
-        else: self._effective = self.__merge__(self.left,self.right)
+        else: self._effective = self.__merge__(self.left,self.right)#
+        self._external_sym_factors = 1 # this one is determine by each species external choices
+        #foreach OUT species add power!
+        left_external = self._effective[:,1]
+        self._external_sym_factors = factorial(left_external, exact=True).prod()
+        
         
     def __merge__(self, interaction_r, interaction_l):
         left = interaction_l._mat
@@ -280,7 +291,7 @@ class compound_interaction(object):
         return np.array([l[:,1], r[:,0]]).T + residual.T, multiplicity.sum()
         
     @property
-    def symmetry_factor(self): return self._symmetry_factor * self._child_syms
+    def symmetry_factor(self): return self._symmetry_factor * self._child_syms * self._external_sym_factors
     
     @property
     def effective_interaction(self):  return interaction(self._effective)
