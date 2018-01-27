@@ -78,8 +78,10 @@ class interaction(object):
 
     def __eq__(self,other): return np.array_equal(self._mat, other._mat)
     
-    #todo make hashable
-
+    def __and__(self,other):
+        c = compound_interaction(self,other)
+        print("symmetry factor:",c.symmetry_factor)
+        return c.effective_interaction
         
     def __add__(self,other):
         a = np.array(self._mat) + np.array(other._mat)
@@ -242,4 +244,61 @@ class interaction_system:
                 self.couplings[k] = INV_MEASURE/res[-1]
         
         
+#manage heairchy of nodes
+#validator is global and if we can validate it, we can add it to the pile 
+class compound_interaction(object):
+    def __init__(self,nodea,nodeb):
+        """
+        nodes can be either interactions with a ._mat or they can be wrappers i.e. compound_interaction
+        """
+        self.left,self.right = nodea,nodeb
+        self._symmetry_factor = 1
+        self._child_syms = 1
+        if isinstance(nodea, compound_interaction):
+            self._left = nodea
+            self._right = nodeb
+            self._effective = self.__merge__(nodea.effective_interaction, nodeb.effective_interaction)
+            self._child_syms = nodea.symmetry_factor * nodeb.symmetry_factor
+        else: self._effective = self.__merge__(self.left,self.right)
         
+    def __merge__(self, interaction_r, interaction_l):
+        left = interaction_l._mat
+        right = interaction_r._mat
+        self._symmetry_factor = 1
+        residual, self._symmetry_factor = compound_interaction.pair_matrices(right,left)
+        return residual
+        
+    def pair_matrices(r,l):
+        l,r = np.array(l),np.array(r)
+        l_,r_ = l[:,0],r[:,1] #left internal, #right internal
+        s,e = l[:,1], r[:,0] #left external, #right external
+        binding = np.array([l_,r_]) #internal nodes
+        pairings = binding.min(0) #per species possibles
+        residual = binding - pairings #what is left over after binding to add to externals
+        has_pairings = (pairings>0).astype(int) #mask
+        multiplicity = l_ * has_pairings #left internal used for symmetry factor (for all species)
+        return np.array([l[:,1], r[:,0]]).T + residual.T, multiplicity.sum()
+        
+    @property
+    def symmetry_factor(self): return self._symmetry_factor * self._child_syms
+    
+    @property
+    def effective_interaction(self):  return interaction(self._effective)
+    
+    def _repr_html_(self):  return diagrams.diagram(self.effective_interaction)._repr_html_()
+    
+    def display_construction(self): pass
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    

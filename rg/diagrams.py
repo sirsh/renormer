@@ -40,7 +40,7 @@ class diagram(HTML):
         ispec = diagram.sort_species(ispec)
         iangles = diagram.angles(ispec)
         ofpsec = diagram.sort_species(ospec)
-        oangles = diagram.angles(ispec,is_out=True)
+        oangles = diagram.angles(ospec,is_out=True)
         
         for c,i in enumerate(ispec):
             a = iangles[c]
