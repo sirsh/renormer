@@ -79,7 +79,7 @@ class interaction(object):
     def __eq__(self,other): return np.array_equal(self._mat, other._mat)
     
     def __and__(self,other):
-        c = compound_interaction(self,other)
+        c = compound_interaction(other,self)
         print("symmetry factor:",c.symmetry_factor)
         return c.effective_interaction
         
