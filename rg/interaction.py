@@ -475,13 +475,21 @@ class interaction_system:
         return True
 
 class composite_interaction(object): # I might extend interaction in future but for now ill wrap
-    def __init__(self, interaction):
-        self._pairing_maps = [] #as we add things, we record which indexed entity we merged to. gives some extra internal structure
-        self._tensor = np.expand_dims(interaction.tensor.copy(), axis=0) #unless we already behave propertly
-        self._internal_symmetries = [1] # a list of internal symmetries from merging events
-        self._loops = 0
-        self._edges =[] #these are internal edges strictly
-        
+    def __init__(self, interaction): 
+        #this is just clone behaviour - respect immutability
+        if isinstance(interaction, composite_interaction):
+            self._tensor = interaction.tensor.copy()
+            self._pairing_maps = list(interaction._pairing_maps) #not sure if i am cloning this properly
+            self._edges = list(interaction._edges)
+            self._loops = interaction._loops
+            self._internal_symmetries = list(interaction._internal_symmetries)
+        else:
+            self._tensor = np.expand_dims(interaction.tensor.copy(), axis=0) #unless we already behave propertly
+            self._pairing_maps = [] #as we add things, we record which indexed entity we merged to. gives some extra internal structure
+            self._edges =[] #these are internal edges strictly - generated from pairing maps
+            self._loops = 0 #  - generated from pairing maps    
+            self._internal_symmetries = [1] # a list of internal symmetries from merging events
+
     #yield pairs of paths by parsing the maps
     #{upper:[], lower:[]}
     def _loop_paths_(self):  pass
@@ -538,6 +546,8 @@ class composite_interaction(object): # I might extend interaction in future but 
 
     #make this into a proper immutable product
     def product(self, a):
+        #should not act on self
+    
         #assert a is of type interaction or composite - composite is only superficially supported
         #in future there will be only interaction and it will have all the internal structure
         species_pairing_list = []
@@ -550,28 +560,31 @@ class composite_interaction(object): # I might extend interaction in future but 
         multiplicity = species_pairings_counts.sum() 
         for idx, count in enumerate(species_pairings_counts): #expand 
             for c in range(count): species_pairing_list.append(idx)
-        if len(species_pairing_list) ==0: return self# this helps define the identity: any other matrix that doesnt induce a pairing has no impact on self
+                
+        #always return clone
+        res = composite_interaction(self)
+        
+        if len(species_pairing_list) ==0: return res# this helps define the identity: any other matrix that doesnt induce a pairing has no impact on self
         
         #we reduce the residual value on their inputs and our outputs according to the pairing masks
         #then we add their residual (possibly empty) to the stack to hold onto the structure of the mappings
         for counter ,species in enumerate(species_pairing_list):
-            pairing_index = self.__first_free_on_tensor__(species)
+            pairing_index = res.__first_free_on_tensor__(species)
             pairing_map.append({ "species" : species, "vertex_instance":pairing_index})
             #here we address the rank three tensor to point to the out field of the correct species on the correct subgraph instance
-            self._tensor[pairing_index,species,OUT_FIELD]-=1 
+            res._tensor[pairing_index,species,OUT_FIELD]-=1 
             #in future i should generalise this to deal with complex RHS for now assume it is a basic interaction being folded into the complex
             input_residual_left[species, IN_FIELD]-=1
-        
-        self._tensor = np.stack(list(self._tensor[:]) + [input_residual_left])#restack
-        
+            
+        res._tensor = np.stack(list(res.tensor[:]) + [input_residual_left])#restack
         #update objects in the structure
-        self._internal_symmetries.append(multiplicity)
-        self._pairing_maps.append(pairing_map)       
-        self._edges = list(self.__iter_edges__()) #uses pairing maps to expand
-        self._loops += (len(species_pairing_list) - 1)
-        #self.loops += a.loops
-              
-        return self
+        res._internal_symmetries.append(multiplicity)
+        res._pairing_maps.append(pairing_map)       
+        res._edges = list(res.__iter_edges__()) #uses pairing maps to expand
+        res._loops += (len(species_pairing_list) - 1)
+        #todo update loops and stuff for more complicated situtation when joining something from the right that is not just a residual
+    
+        return res
         
     def coproduct(self, a):
         pass

@@ -86,7 +86,7 @@ class composition_diagram():
     def body(self):  return self._body
         
     def __repr__(self):
-        return  """<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" x="{1}" y="{2}" width="200" height="120">
+        return  """<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" x="{1}" y="{2}" width="500" height="120">
       <g fill="none" stroke="black" stroke-width="1.6" stroke-linecap="round"> {0}  </g> </svg>""".format(self.body, self.x, self.y)
     
     def _repr_html_(self):   return str(self)
@@ -131,7 +131,7 @@ class diagram_set(object):
         DG = composition_diagram
         total_offsets = offset * len(collection) + offset
         entities = [DG(c, y_offset=offset*(i)).__repr__() for i, c in enumerate(collection)]
-        self.body =  """<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" x="0" y="0" width="240" height="{1}">{0}</svg>""".format(entities,total_offsets+10)
+        self.body =  """<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" x="0" y="0" width="500" height="{1}">{0}</svg>""".format(entities,total_offsets+10)
     def __repr__(self):  return  self.body
     def _repr_html_(self):   return str(self)     
         
