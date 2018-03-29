@@ -36,7 +36,8 @@ dim = Symbol("d")
 T = Symbol("T")
 L = Symbol("L")
 INV_MEASURE = 1/ ( T * (L**dim))
-
+IN_FIELD = 0
+OUT_FIELD = 1
 
 def __display_all_(interactions, show_mat=False):
     return [d.display(show_mat) for d in interactions]
@@ -107,6 +108,8 @@ class interaction(object):
     def __hash__(self):  return hash(str(self._mat))
 
     def __eq__(self,other): return np.array_equal(self._mat, other._mat)
+    
+    def __mul__(self,other):  return self.__and__(other)
     
     def __and__(self,other):
         if isinstance(other,_interaction_identity):return self
@@ -468,18 +471,173 @@ class interaction_system:
                 
         #at the very end we may have got all our base fields but there may be some by-products for which we did not update couplings
         #we can optinally do this now
-                
-                
+                              
         return True
-            
+
+class composite_interaction(object): # I might extend interaction in future but for now ill wrap
+    def __init__(self, interaction):
+        self._pairing_maps = [] #as we add things, we record which indexed entity we merged to. gives some extra internal structure
+        self._tensor = np.expand_dims(interaction.tensor.copy(), axis=0) #unless we already behave propertly
+        self._internal_symmetries = [1] # a list of internal symmetries from merging events
+        self._loops = 0
+    #yield pairs of paths by parsing the maps
+    #{upper:[], lower:[]}
+    def _loop_paths_(self):  pass
+
+    def get_topoligical_properties(self):
+        #exteded_topology functions
+        #how many back paths, total paths (end, source)
+        #how many relative (site, site) back paths, total paths
+        #how many intermedite loops
+        pass
+
+    #this is temporary - i do not know how i want to defined equality -it could be on the residual or otherwise
+    def __hash__(self):  return hash(str(self._tensor))
+    def __eq__(self,other): return np.array_equal(self._tensor, other.tensor)
+
+    @property
+    def length(self): return self._tensor.shape[0]
+    @property 
+    def internal_symmetry(self):return np.array(self._internal_symmetries).prod()
+    @property 
+    def external_symmetry(self): return factorial(self.residual[:,OUT_FIELD], exact=True).prod()
+    @property 
+    def total_symmetry(self): return self.internal_symmetry * self.external_symmetry  
+    @property
+    def loops(self):  return self._loops #this can be calcuated from sum of (length_of_pairing_maps_i - 1)
+    @property
+    def residual(self): return self._tensor.sum(axis=0)
+    @property
+    def residual_interaction(self): return interaction(self._tensor.sum(axis=0))
+    
+    @property
+    def tensor(self): return self._tensor
+    @property
+    def number_internal_merged_edges(self):return np.array([len(m) for m in self._pairing_maps]).sum()
+    @property
+    def number_internal_vertices(self):  return 0 if self._tensor.shape[0] <= 2 else self._tensor.shape[0] - 2
+    
+    @property
+    def edges(self):
+        for i, m in enumerate(self._pairing_maps):
+            self_vertex = i+1
+            #each entry in the paring can be length L=1 or more; there are L-1 loops formed
+            for lidx, d in enumerate(m):
+                #I create an edge using a tuple pointing from them to me
+                edge = [d["vertex_instance"], self_vertex]
+                #if there are mutliple edges, the others are a back flow i think 
+                if lidx > 0: edge = list(reversed(edge))
+                yield {"edge_species" : d["species"], "edge":edge}
+    
+    #each entry in pairing map is the merge between two componenents... 
+    #whenenver we split
+          
+    def __pairing_tensor__(self, left_tensor2,right_tensor2):  return np.stack((left_tensor2[:,IN_FIELD], right_tensor2[:,OUT_FIELD])).T
+       
+    def __first_free_on_tensor__(self, species):
+        for i in range(self._tensor.shape[0]):
+            if self._tensor[i,species,OUT_FIELD]: return i
+        #for testing i want to assert this does not happen
+        raise "There is no free residual for species as expected - please check first for consistent behaviour"  
+        return -1
+    
+    def __mul__(self,other):  return self.__and__(other)
+    
+    def __and__(self,other): return self.product(other)
+
+    def product(self, a):
+        #assert a is of type interaction or composite - composite is only superficially supported
+        #in future there will be only interaction and it will have all the internal structure
+        species_pairing_list = []
+        pairing_map = []
+        input_residual_left = a.residual.copy() 
+        #simply stack the powers of inputs and outputs on the residual e.g. [[2,0],[2,0]] is a pairing on species A that creates a loop
+        #compact to 1 rank tensor by taking the min of inputs and outputs on each species
+        species_pairings_counts =  self.__pairing_tensor__(input_residual_left,self.residual).min(axis=1)
+        # this is true because if we can pair, then our in legs have choices for each of their out legs - this is in dirac <binding_count_vector, actual_output_connectors>
+        multiplicity = species_pairings_counts.sum() 
+        for idx, count in enumerate(species_pairings_counts): #expand 
+            for c in range(count): species_pairing_list.append(idx)
+        if len(species_pairing_list) ==0: return self# this helps define the identity: any other matrix that doesnt induce a pairing has no impact on self
+        
+        #we reduce the residual value on their inputs and our outputs according to the pairing masks
+        #then we add their residual (possibly empty) to the stack to hold onto the structure of the mappings
+        for counter ,species in enumerate(species_pairing_list):
+            pairing_index = self.__first_free_on_tensor__(species)
+            pairing_map.append({ "species" : species, "vertex_instance":pairing_index})
+            #here we address the rank three tensor to point to the out field of the correct species on the correct subgraph instance
+            self._tensor[pairing_index,species,OUT_FIELD]-=1 
+            #in future i should generalise this to deal with complex RHS for now assume it is a basic interaction being folded into the complex
+            input_residual_left[species, IN_FIELD]-=1
+        
+        self._tensor = np.stack(list(self._tensor[:]) + [input_residual_left])#restack
+        
+        #update objects in the structure
+        self._internal_symmetries.append(multiplicity)
+        self._pairing_maps.append(pairing_map)
+        self._loops += (len(species_pairing_list) - 1)
+        #self.loops += a.loops
+        
+        return self
+        
+    def coproduct(self, a):
+        pass
+    
+    def display(self,compact=False):
+        #all species are colour coded. in fields are circles, out fields are discs
+        return composition_diagram(self.tensor, self.edges, compact)()
+    
+    @property
+    def residual_complement(self):
+        comp = np.zeros(self.tensor.shape,np.int)
+        for e in self.edges:
+            for idx, v in enumerate(e["edge"]):   
+                comp[v][e["edge_species"]][int(v != np.array(e["edge"]).max())]+=1 
+                
+        return comp
+    
+    @property
+    def original_diagrams(self):
+        return self.residual_complement + self.tensor
+    
+    def graph_dataframes(self):
+        vertices,edges = [], []
+        #vertices: [index,type,valance,internal,external]
+        for i in range(self.length):
+            type_ = "source" if i ==0 else "sink" if i == self.length - 1 else "internal"
+            vertices.append({"type" : type_, "external_legs" : self.tensor[i].sum(), "internal_legs" : 0  })
+        #edges: [index, source,target,is_back,species]
+        for e in self.edges:
+            for v in e["edge"]: vertices[v]["internal_legs"]+=1
+            edges.append({"source": e["edge"][0], 
+                          "target": e["edge"][1], 
+                          "internal" : True,
+                          "species" : e["edge_species"], 
+                          "is_backflow" : e["edge"][0]>e["edge"][1]} )
+       
+        for species in range(self.residual.shape[0]):
+            for outlegs in range(self.residual[species][OUT_FIELD]): 
+                edges.append({"source": len(vertices)-1, "target": -1, "internal": False, "species": species, "is_backflow":False})
+            for inlegs in range(self.residual[species][IN_FIELD]):
+                edges.append({"target": 0, "source": -1, "internal": False, "species": species, "is_backflow":False})    
+        
+        #compute original per species valences
+        for idx, slicer in enumerate(self.original_diagrams):
+            vertices[idx]["degree_in"], vertices[idx]["degree_out"] =0,0
+            for spec_idx, species in enumerate(slicer):
+                vertices[idx]["species"+str(spec_idx)+"_in"] = species[IN_FIELD]
+                vertices[idx]["species"+str(spec_idx)+"_out"] = species[OUT_FIELD]
+                vertices[idx]["degree_in"]+= species[IN_FIELD]
+                vertices[idx]["degree_out"] += species[OUT_FIELD]
+                
+        return pd.DataFrame(vertices), pd.DataFrame(edges)
         
         
-#manage heirarchy of nodes
-#validator is global and if we can validate it, we can add it to the pile 
+#DECPRECATE
 class compound_interaction(object):
     def __init__(self,nodea,nodeb):
         """
-        nodes can be either interactions with a ._mat or they can be wrappers i.e. compound_interaction
+        nodes can be either interactions with a ._mat or they can be wrappers i.e. compound_interaction - DEPRECATED replace with composite
         """
         self.left,self.right = nodea,nodeb
         self._symmetry_factor = 1
