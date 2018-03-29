@@ -17,6 +17,125 @@ import math
 
 
 
+class composition_diagram():
+    def __init__(self, ci, compact=False, x_offset=0,y_offset=0):
+        self.x = x_offset
+        self.y = y_offset
+        self.v,self.e = ci.graph_dataframes()
+        self.default_offset = 30
+        self.default_edge_x_off = 10     
+        self.tensor = ci.tensor.copy()
+        self.edges =ci.edges
+        self.compact = compact 
+        self.length = self.tensor.shape[0]
+        self.__make_svg__()
+    
+    def partitions(self,  l, spacing=10,baseline=50):
+        shift = ((l + 1) * spacing ) / 2
+        for i in range(l):  yield int(((i+1)*spacing+baseline)-shift)
+
+    @property
+    def stubs(self):return pd.DataFrame(self.__stubs__).sort_values("vid")
+    
+    @property
+    def __stubs__(self):  
+        for i,k in self.e.iterrows():
+            if k["internal"]:    
+                edge = np.array([k["source"],k["target"]])#this can be confusing- there is directionality versus connectivity
+                d = dict(k)
+                d["id"], d["in"], d["vid"] = i,True, edge.max()
+                yield d
+                d = dict(k)
+                d["id"], d["in"], d["vid"] = i,False, edge.min()
+                yield d
+            else:
+                d = dict(k)
+                source, direction = k["source"], False
+                if source < 0: source, direction = k["target"], True
+                d["id"], d["in"], d["vid"] = i,direction,source
+                yield d
+
+    @property
+    def coords(self):
+        v,e = self.v,self.e
+        major_offset, minor_spacing,baseline = 50,18,50 #todo make these class props?
+        centers = list(reversed([20+i*major_offset for i in range(len(v))]))#from left to right draw backwards
+        v["x"], v["y"]  = centers, baseline    
+        #add all the stubs
+        newVs = []
+        for i,k in v.iterrows():
+            internals = k["degree_in"]
+            externals = k["degree_out"]
+            #todo add species to these, do we know if they are internal or not, can we draw edges - well 
+            for p in self.partitions(internals, spacing=minor_spacing, baseline=baseline):
+                newVs.append({ "x": centers[i]+minor_spacing, "y": p, "in": True, "vid":i})
+            for p in self.partitions(externals, spacing=minor_spacing, baseline=baseline):
+                newVs.append({ "x": centers[i]-minor_spacing, "y": p, "in": False, "vid":i})
+        stubs = pd.DataFrame(newVs)
+        
+        #NEED TO BE CAREFUL HERE - I AM NOT SURE ABOUT THE ORDER OF THIS THING IN GENERAL - we should join teh rank carefully
+        stubs["rank"]= stubs.reset_index().groupby(["vid", "in"]).rank(method="min")["index"].astype(int)
+        estubs = self.stubs
+        estubs["rank"]= estubs.groupby(["vid", "in"]).rank(method="min")["id"].astype(int)
+        stubs = pd.merge(estubs,stubs, on=["in", "vid", "rank"], how='inner') 
+        assert len(estubs) == len(stubs), "there should be a coordinate for every stub entry which is not the case!"
+        assert len(estubs) == len(stubs.groupby(["x", "y"])), "although there is a coordainte for each stub, they are not unique - they should be!"
+        return v, stubs, None
+
+    @property
+    def body(self):  return self._body
+        
+    def __repr__(self):
+        return  """<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" x="{1}" y="{2}" width="200" height="120">
+      <g fill="none" stroke="black" stroke-width="1.6" stroke-linecap="round"> {0}  </g> </svg>""".format(self.body, self.x, self.y)
+    
+    def _repr_html_(self):   return str(self)
+    
+    def symmetric_offsets(self, l, offset=70): return [offset-20+20*i for i in range(l)]
+    
+    def draw_line(self, pts, colour, dash_array=None):
+        dash_array = """stroke-dasharray='{}'""".format(dash_array) if dash_array != None else ""
+        self._body+= """<line x1="{0}" y1="{1}" x2="{2}" y2="{3}" stroke="{4}" stroke-width:2"  {5} />""".format(*pts, colour,dash_array )
+        
+    #todo - i should do the body in relative coords so that i can place lots of diagrams in the picture
+    def __make_svg__(self):
+        self._body = ""
+        colours = ["green", "orange", "red"]
+        vertices,stubs,links = self.coords
+        vertices_coords = []
+        #the original vertex cores are drawn on the horizontal
+        for i,k in vertices.iterrows():
+            vertices_coords.append([k["x"], k["y"]])
+            self._body +="""<circle cx="{0}" cy="{1}" r="3" stroke="black" stroke-width="1" fill="black" /> """.\
+            format(k["x"], k["y"])
+        #we draw stubs from the original vertex which are connection points
+        for i,k in stubs.iterrows():
+            colour = colours[k["species"]]
+            self._body +="""<circle cx="{0}" cy="{1}" r="2" stroke="{3}" stroke-width="1" {2} /> """.\
+            format(k["x"], k["y"], "" if k["in"] else "fill='{}'".format(colour), colour)
+        #draw edges - the edge id is the grouping - internal edges should be paired up neatly
+        for i,grp in stubs.groupby("id"):
+            l = len(grp)
+            dash_array = "2,2" if l == 2 else None
+            head = dict(grp.iloc[0])
+            self.draw_line([head["x"], head["y"], *vertices_coords[head["vid"]]],colours[head["species"]], dash_array=dash_array)
+            if l == 2: #internal edges
+                tail = dict(grp.iloc[-1])
+                self.draw_line([head["x"], head["y"], tail["x"], tail["y"]],colours[head["species"]], dash_array=dash_array)
+                self.draw_line([tail["x"], tail["y"], *vertices_coords[tail["vid"]]],colours[tail["species"]], dash_array=dash_array)
+        return self._body
+  
+    
+class diagram_set(object):
+    def __init__(self, collection,offset=50):
+        DG = composition_diagram
+        total_offsets = offset * len(collection) + offset
+        entities = [DG(c, y_offset=offset*(i)).__repr__() for i, c in enumerate(collection)]
+        self.body =  """<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" x="0" y="0" width="240" height="{1}">{0}</svg>""".format(entities,total_offsets+10)
+    def __repr__(self):  return  self.body
+    def _repr_html_(self):   return str(self)     
+        
+        
 class diagram_complex(HTML):
     def __init__(self, diagrams, layout_props={}):
         pass

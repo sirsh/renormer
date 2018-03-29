@@ -480,6 +480,8 @@ class composite_interaction(object): # I might extend interaction in future but 
         self._tensor = np.expand_dims(interaction.tensor.copy(), axis=0) #unless we already behave propertly
         self._internal_symmetries = [1] # a list of internal symmetries from merging events
         self._loops = 0
+        self._edges =[] #these are internal edges strictly
+        
     #yield pairs of paths by parsing the maps
     #{upper:[], lower:[]}
     def _loop_paths_(self):  pass
@@ -516,18 +518,7 @@ class composite_interaction(object): # I might extend interaction in future but 
     def number_internal_merged_edges(self):return np.array([len(m) for m in self._pairing_maps]).sum()
     @property
     def number_internal_vertices(self):  return 0 if self._tensor.shape[0] <= 2 else self._tensor.shape[0] - 2
-    
-    @property
-    def edges(self):
-        for i, m in enumerate(self._pairing_maps):
-            self_vertex = i+1
-            #each entry in the paring can be length L=1 or more; there are L-1 loops formed
-            for lidx, d in enumerate(m):
-                #I create an edge using a tuple pointing from them to me
-                edge = [d["vertex_instance"], self_vertex]
-                #if there are mutliple edges, the others are a back flow i think 
-                if lidx > 0: edge = list(reversed(edge))
-                yield {"edge_species" : d["species"], "edge":edge}
+
     
     #each entry in pairing map is the merge between two componenents... 
     #whenenver we split
@@ -545,6 +536,7 @@ class composite_interaction(object): # I might extend interaction in future but 
     
     def __and__(self,other): return self.product(other)
 
+    #make this into a proper immutable product
     def product(self, a):
         #assert a is of type interaction or composite - composite is only superficially supported
         #in future there will be only interaction and it will have all the internal structure
@@ -574,18 +566,20 @@ class composite_interaction(object): # I might extend interaction in future but 
         
         #update objects in the structure
         self._internal_symmetries.append(multiplicity)
-        self._pairing_maps.append(pairing_map)
+        self._pairing_maps.append(pairing_map)       
+        self._edges = list(self.__iter_edges__()) #uses pairing maps to expand
         self._loops += (len(species_pairing_list) - 1)
         #self.loops += a.loops
-        
+              
         return self
         
     def coproduct(self, a):
         pass
     
-    def display(self,compact=False):
-        #all species are colour coded. in fields are circles, out fields are discs
-        return composition_diagram(self.tensor, self.edges, compact)()
+    def __repr__(self): return diagrams.composition_diagram(self).__repr__()
+    def _repr_html_(self):   return self.__repr__()
+        
+    def display(self,compact=False): return diagrams.composition_diagram(self)
     
     @property
     def residual_complement(self):
@@ -597,32 +591,31 @@ class composite_interaction(object): # I might extend interaction in future but 
         return comp
     
     @property
-    def original_diagrams(self):
-        return self.residual_complement + self.tensor
+    def original_vertices(self):   return self.residual_complement + self.tensor
     
+    @property
+    def edges(self):  return self._edges
+    
+    def __iter_edges__(self):
+        for i, m in enumerate(self._pairing_maps):
+            self_vertex = i+1
+            #each entry in the paring can be length L=1 or more; there are L-1 loops formed
+            for lidx, d in enumerate(m):
+                #I create an edge using a tuple pointing from them to me
+                edge = [d["vertex_instance"], self_vertex]
+                #if there are mutliple edges, the others are a back flow i think 
+                if lidx > 0: edge = list(reversed(edge))
+                yield {"edge_species" : d["species"], "edge":edge}
+                
     def graph_dataframes(self):
         vertices,edges = [], []
         #vertices: [index,type,valance,internal,external]
         for i in range(self.length):
             type_ = "source" if i ==0 else "sink" if i == self.length - 1 else "internal"
             vertices.append({"type" : type_, "external_legs" : self.tensor[i].sum(), "internal_legs" : 0  })
-        #edges: [index, source,target,is_back,species]
-        for e in self.edges:
-            for v in e["edge"]: vertices[v]["internal_legs"]+=1
-            edges.append({"source": e["edge"][0], 
-                          "target": e["edge"][1], 
-                          "internal" : True,
-                          "species" : e["edge_species"], 
-                          "is_backflow" : e["edge"][0]>e["edge"][1]} )
-       
-        for species in range(self.residual.shape[0]):
-            for outlegs in range(self.residual[species][OUT_FIELD]): 
-                edges.append({"source": len(vertices)-1, "target": -1, "internal": False, "species": species, "is_backflow":False})
-            for inlegs in range(self.residual[species][IN_FIELD]):
-                edges.append({"target": 0, "source": -1, "internal": False, "species": species, "is_backflow":False})    
         
         #compute original per species valences
-        for idx, slicer in enumerate(self.original_diagrams):
+        for idx, slicer in enumerate(self.original_vertices):
             vertices[idx]["degree_in"], vertices[idx]["degree_out"] =0,0
             for spec_idx, species in enumerate(slicer):
                 vertices[idx]["species"+str(spec_idx)+"_in"] = species[IN_FIELD]
@@ -630,9 +623,24 @@ class composite_interaction(object): # I might extend interaction in future but 
                 vertices[idx]["degree_in"]+= species[IN_FIELD]
                 vertices[idx]["degree_out"] += species[OUT_FIELD]
                 
+        for e in self.edges:
+            #update the internal legs everytime we see involvement in interaction
+            for v in e["edge"]: vertices[v]["internal_legs"]+=1
+            #add the internal legs    
+            edges.append({"source": e["edge"][0], 
+                          "target": e["edge"][1], 
+                          "internal" : True,
+                          "species" : e["edge_species"], 
+                          "is_backflow" : e["edge"][0]>e["edge"][1]} )
+            
+        for vid, vertex in enumerate(self.tensor):#this is where the residuals are stored
+            for sid, species in enumerate(vertex):
+                for residual in range(species[OUT_FIELD]):#residual out fields have the source specified, they are external and non backflow
+                    edges.append({"source": vid, "target": -1, "internal": False, "species": sid, "is_backflow":False})
+                for residual in range(species[IN_FIELD]):#residual in fields have the target specified, they are external and non backflow
+                    edges.append({"source": -1, "target": vid, "internal": False, "species": sid, "is_backflow":False})
+                    
         return pd.DataFrame(vertices), pd.DataFrame(edges)
-        
-        
 #DECPRECATE
 class compound_interaction(object):
     def __init__(self,nodea,nodeb):
