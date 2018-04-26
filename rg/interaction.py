@@ -474,6 +474,14 @@ class interaction_system:
                               
         return True
 
+    
+        
+    
+#TODO: having worked through states and how this thing is rendered, the state can be represented by three matrices (which in some sense generate each other)
+#1 ) the residual tensor
+#2 ) the residual complement tensor
+#2 ) the internal structure tensor of the form [speciesId, sourceId, targetId,flowIndicator,stubRankIndicator, symmetryContribution, loop factor (1 for every backflow edge?]
+#the product can be properly defined by updating the residual and structure tensor on A and merging in elements from structure tensor B
 class composite_interaction(object): # I might extend interaction in future but for now ill wrap
     def __init__(self, interaction): 
         #this is just clone behaviour - respect immutability
@@ -494,7 +502,7 @@ class composite_interaction(object): # I might extend interaction in future but 
     #{upper:[], lower:[]}
     def _loop_paths_(self):  pass
 
-    def get_topoligical_properties(self):
+    def get_topological_properties(self):
         #exteded_topology functions
         #how many back paths, total paths (end, source)
         #how many relative (site, site) back paths, total paths
@@ -502,8 +510,18 @@ class composite_interaction(object): # I might extend interaction in future but 
         pass
 
     #this is temporary - i do not know how i want to defined equality -it could be on the residual or otherwise
-    def __hash__(self):  return hash(str(self._tensor))
-    def __eq__(self,other): return np.array_equal(self._tensor, other.tensor)
+    
+    def __hash__(self): 
+        #based on equality, this is how I think of diagrams being equal - subject to change!
+        tup = (self.residual_complement[1:,:,IN_FIELD],self.residual)
+        return hash(str(tup))
+
+    def __eq__(self,other): 
+        #this is the same as saying what momentum is flowing into vertices at depth d in the diagram
+        #we start from 1 because there is no internal momentum flowing into the depth 0 vertex, then we consider all species and IN FLUX
+        left_residudal_complement_a = self.residual_complement[1:,:,IN_FIELD]
+        left_residudal_complement_b = other.residual_complement[1:,:,IN_FIELD]       
+        return np.array_equal(self.residual, other.residual) and np.array_equal(left_residudal_complement_a, left_residudal_complement_b)
 
     @property
     def length(self): return self._tensor.shape[0]
@@ -527,7 +545,6 @@ class composite_interaction(object): # I might extend interaction in future but 
     @property
     def number_internal_vertices(self):  return 0 if self._tensor.shape[0] <= 2 else self._tensor.shape[0] - 2
 
-    
     #each entry in pairing map is the merge between two componenents... 
     #whenenver we split
           
@@ -594,6 +611,7 @@ class composite_interaction(object): # I might extend interaction in future but 
         
     def display(self,compact=False): return diagrams.composition_diagram(self)
     
+    #maybe inefficient todo this - should i store the original and then take diffs-does that work
     @property
     def residual_complement(self):
         comp = np.zeros(self.tensor.shape,np.int)
@@ -620,6 +638,19 @@ class composite_interaction(object): # I might extend interaction in future but 
                 if lidx > 0: edge = list(reversed(edge))
                 yield {"edge_species" : d["species"], "edge":edge}
                 
+    def vertex_residual_contribution(self):
+        """I think this denotes an external vertex- one that has free flags
+           Each actual vertex takes a slice in the tensor stack - the tensor records what it burnt and not burnt"""
+        return [t.sum() for t in self.tensor]
+        
+    @property
+    def external_vertices(self):
+        """Need to be careful with language - i think in graph frames i used non sink/source to be 'internal' """
+        ex = []
+        for i, t in enumerate(self.vertex_residual_contribution()):
+            if t > 0: ex.append(i)#if the vertex has some residual, add it's Id to the list
+        return ex
+        
     def graph_dataframes(self):
         vertices,edges = [], []
         #vertices: [index,type,valance,internal,external]

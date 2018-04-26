@@ -10,6 +10,11 @@ from sympy import sympify
 from sympy import Symbol
 from sympy import Matrix
 from sympy import solve
+from sympy import init_printing
+
+from sympy import latex
+sympy.init_printing()
+
 from . interaction import  interaction as J, dim, T, L, INV_MEASURE, IN_FIELD, OUT_FIELD
 
 class matrix_accessor(object):
@@ -17,13 +22,24 @@ class matrix_accessor(object):
     @property    
     def general_form(self): return Matrix([ t.general_form for t in self.ts ])
     def criterion(self, d=4): return Matrix([ t.criterion(d) for t in self.ts ])
+    def dimensionless_terms(self): return Matrix([  [c.display() for c in t.dimensionless ] for t in self.ts if t.is_valid]) 
+#TODO: ADD this one which presents all the couplings side by side for all the theories
+#dfs = []
+#for k in cs:
+#    M = k.interpret_couplings(interactions)
+#    df = pd.DataFrame(M.tolist(), columns=["vertex", "coupling"]).set_index("vertex")
+#    dfs.append(df)
+#dfs = pd.concat(dfs,axis=1).reset_index()
+#return Matrix(dfs.as_matrix())
     
 class ftheory(dict):
     def __init__(self, *args, **kwargs):
         self.size = None
         self.update(*args, **kwargs)
         self.is_valid = False
+        self.dimensionless = []
         if "dimensionless" in kwargs:
+            self.dimensionless = kwargs["dimensionless"]
             for k in kwargs["dimensionless"]:  self[k] = 1        
         self.fields = None
         try:
