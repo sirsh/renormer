@@ -1,1 +1,33 @@
-helper for doing doi-peliti RG - this is a rough prototype.
+helper for doing doi-peliti RG - this is a rough prototype. I will refactor it when I have put a foundation in place.
+at first i added files one by one as utils to deal with certain parts of the process. 
+in this way i mixed paradigms in places which i would like to remedy. 
+i will probably change it to have type: edge or propagator, vertex or interaction, and graph as a composite interaction and then viz (diagrams). 
+theory is a separate type that deals with dimensional analysis etc - might put that at root module level
+these need the graph theoretic ops and also some that are based on tensor products and algebras over half edges etc.
+perhaps a functional paradigm to contain operations for a) graph theory - operations on adj or inc matrices b) symbol (sympy) wrappers c)integrals. 
+once these are abstracted, the "types" can just call into these functions to do integrations etc.
+misc todo:
+ make it easier to turn a general graph into a loop(s) part. at the moment this is cumbersome - (statefull -ugh!)
+
+
+structure should then be
+
+global:
+ session stuff - set styles and symbol labels etc. ill probably never implement this but someone could and pass to various classes as props
+ graph_factory which initalises verties and graphs with global propagator info - otherwise would need to define it for each new graph
+   - this would actually be easy to use as we effectively redefine vertex with new closed functions V(), G() etc. which behave as originals
+
+types:
+ vertex (actually this is a primitive graph and needs sensible overlap - i might subclass graph)
+ propagator (more than an edge - deals with representations in k,omega etc.)
+ graph (inherits operators from modules) - there are a number of tensor-based reprs. this needs structure and extended /edge propagator info
+ theory (will rename this to something when i figure out scopes)
+
+(create a base class for types that take dict properties, generate SVG and or latex reprs)
+
+modules
+ graph_theory (things like spanning trees and graph polynomials)
+ symbolic (wrappers on sympy)
+ diagrams (viz)
+ integration (special functions)
+ algebra (tensors or otherwise)

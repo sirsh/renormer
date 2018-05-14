@@ -175,7 +175,8 @@ class composition_diagram():
     
 #some way to control the scale of the sub diagrams e.g. the loops (and maybe other parameters being passed through as dicts
 class diagram_set(object):
-    def __init__(self, collection,offset=50,compact=False):
+    def __init__(self, collection,offset=40,compact=False):
+        if compact == True: offset=120
         DG = composition_diagram
         total_offsets = offset * len(collection) + offset
         entities = None
