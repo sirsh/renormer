@@ -120,9 +120,11 @@ class composition_diagram():
     def _describeArc(startAngle, endAngle, x=100, y=100, radius=50):
         #dirty HAck because i dont want think about the general case yet
         if startAngle == 90 and endAngle == 0: startAngle, endAngle = endAngle, startAngle
+        
         start = composition_diagram._polarToCartesian(endAngle, x, y, radius);
         end = composition_diagram._polarToCartesian(startAngle, x, y, radius );
         largeArcFlag = "0" if endAngle - startAngle <= 180 else "1"
+        #print(startAngle, endAngle,largeArcFlag)
         d = [  "M", start["x"], start["y"], "A", radius, radius, 0, largeArcFlag, 0, end["x"], end["y"]  ]
         d = " ".join([str(_d)+" " for _d  in d] )
         return d;       
@@ -159,16 +161,14 @@ class composition_diagram():
         colours = ["green", "orange", "red"]
         _body = ""
         iedges = self.coords[1]
-
         for k,v in self.coords[0].iterrows():
             _body +="""<circle cx="{0}" cy="{1}" r="3" stroke="black" stroke-width="1" fill="black" /> """.\
             format(v["loop_coord"]["x"], v["loop_coord"]["y"])
             _body+= diagram._residual_svg_(v["loop_coord"]["x"], v["loop_coord"]["y"], self.tensor[k],True)
             #append on residuals at each vertex    
-        iedges = iedges[(iedges["internal"]==True)&(iedges["in"]==False)]       
+        iedges = iedges[(iedges["internal"]==True)&(iedges["in"]==False) ] #     
         for k,e in iedges.iterrows():
             _body += """<path d="{}" stroke="{}"/>""".format(composition_diagram._describeArc(e["sangle"],e["eangle"]),colours[e["species"]])
-
         return  """<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" x="{1}" y="{2}" width="200" height="180">
       <g fill="none" stroke="black" stroke-width="1.6" stroke-linecap="round"> {0}  </g> </svg>""".format(_body, self.x, self.y)
   

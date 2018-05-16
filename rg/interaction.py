@@ -113,7 +113,7 @@ class interaction(object):
     
     def __and__(self,other):
         if isinstance(other,_interaction_identity):return self
-        c = compound_interaction(self,other)
+        c = compound_interaction(other,self)
         print("symmetry factor:",c.symmetry_factor)
         return c.effective_interaction
         
@@ -562,7 +562,7 @@ class composite_interaction(object): # I might extend interaction in future but 
     def __and__(self,other): return self.product(other)
 
     #make this into a proper immutable product
-    def product(self, a):
+    def product(self, a, graded=-1):
         #should not act on self
     
         #assert a is of type interaction or composite - composite is only superficially supported
@@ -585,7 +585,9 @@ class composite_interaction(object): # I might extend interaction in future but 
         
         #we reduce the residual value on their inputs and our outputs according to the pairing masks
         #then we add their residual (possibly empty) to the stack to hold onto the structure of the mappings
-        for counter ,species in enumerate(species_pairing_list):
+        #print("pairings", len(species_pairing_list))
+        grade = len(species_pairing_list) if graded == -1 else graded
+        for counter ,species in enumerate(species_pairing_list[:grade]):
             pairing_index = res.__first_free_on_tensor__(species)
             pairing_map.append({ "species" : species, "vertex_instance":pairing_index})
             #here we address the rank three tensor to point to the out field of the correct species on the correct subgraph instance

@@ -1,7 +1,11 @@
+#this should be top level one so noone should import it
 #the main innovation i can make is use the global representation in the graph theoretic sense for the graphs
 #and then have a vetex collection which shows the tensor decompositions in terms of residual and internal half edges
 #i can just keep 2 of three of these set types e.g. residual and internal (which can be summed)
 #graph.vertex_residuals, graph.vertex_flags
+
+#todo - helpers for incident matrix such as enumerate things we care about e.g. external edges, external vertices etc.
+#if graphs have extra edge meta data for species type, field type, they can be slwoly replace interaction
 
 from sympy import latex,init_printing,Matrix,collect,Symbol,expand,solve
 import numpy as np
@@ -10,38 +14,10 @@ from operator import mul,add
 
 import itertools
 
-##############################################
-def _combine(set_of_interactions):
-        def _merge(a,b): 
-            if a is None:return b
-            if b is None:return a
-            return a * b
-        return reduce(_merge, set_of_interactions, None)
-    
-def graph_permutations(primitives, loop_orders = [0,1], max_k=3):
-    if not isinstance(loop_orders, list):loop_orders = [loop_orders]
-    l = []   
-    for i in range(2,max_k+1):
-        for tup in list(itertools.permutations(primitives,i)):
-            res = _combine(list(tup))
-            if res.loops in loop_orders:
-                l.append(res)
-    #todo : define uniqueness and validity
-    return list(set(l))
-
-def distinct_loops(fgset,insist_on_same_residual=False):
-    #I think only the same residual makes sense because otherwise the external momenta are different? but then its the same graph so maybe not
-    d = {}
-    for f in fgset:
-        if f.loops < 1:continue
-        inv_res = f.residual_complement
-        inv_res.flags.writeable = False
-        h = hash(str(inv_res))
-        if h not in d:d[h] = []
-        d[h].append(f)
-    return d
-
-######################################################
+from . propagator import *
+#watch circular
+from . interaction import interaction as J, composite_interaction as G
+from . diagrams import diagram_set
 
 class composite_interaction_graph(object):
     def __init__(self, comp_interaction,connect_inf=False):
@@ -84,6 +60,15 @@ class composite_interaction_graph(object):
         return inc
     
     @property
+    def gamma_integral(self):
+        propagators = cpropagator.from_edges(self.ci.edges,k_node_index=1)
+        K = cpropagator.integrate(propagators)
+        PI = kpropagator(K)
+        return PI.gamma_integral()
+        
+      
+    
+    @property
     def incident_matrix(self):return self._inc
     
     @property
@@ -92,7 +77,13 @@ class composite_interaction_graph(object):
     def laplacian_from_adj(self, adj): return adj.sum(axis=1) * np.eye(adj.shape[0],dtype=np.int) + (adj * -1)
     
     @property
-    def is_1PI(self):  return len(np.where(np.diagonal(self.laplacian)<2)[0]) == 0
+    def is_1PI(self):  
+        inc = self._inc
+        ex_cols = [ c for c in range(inc.shape[1]) if inc[:,c][-1]== 1]
+        external_vertices = list(set([ list(np.where(inc[:,c]==-1)[0])[0] for c in ex_cols]))
+        internal_valance = [  len(np.where(inc[v][:-len(ex_cols)] != 0)[0]) for v in external_vertices]
+        return not np.any(np.array(internal_valance)<2)
+
     
     def betti_number(self,n=1):
         """Assuming the diagram has one connected component E - V"""
@@ -259,5 +250,74 @@ class composite_interaction_graph(object):
         if len(short_edge)> 0 : edges[short_edge[0]] = Symbol("k")
         return edges
 
+    def draw_decomp(self):
+        i,r = self.tensors_from_incidence()
+        vs = i + r
+        return diagram_set([G(J(v)) for v in vs])
+        
+
+    def tensors_from_incidence(self, num_species=2):
+        IN_FIELD = 0
+        OUT_FIELD = 1
+        G = self
+        temp = G.ci.graph_dataframes()[1]
+        num_vertices = G._inc.shape[0] - 1
+        species = temp.species.values   
+        #a convention is needed- this work for externals, but for internals we need convention - its in field if the vid for the source is less than for the target
+        #then later, one has to interpret; check your vids, and check polarity
+        field_types = (temp.source<temp.target).astype(int).values 
+
+        #for each edge get the index, species, IO_field type and vertex id
+        external_edges = [(c,species[c], field_types[c], list(np.where(G._inc[:,c]==-1)[0])[0]) for c in range(G._inc.shape[1]) if G._inc[:,c][-1]==1]
+        residual = np.zeros((num_vertices, num_species,2 ), dtype=np.int)
+        for e in external_edges:  residual[e[3]][e[1]][e[2]] +=1
+
+        map_list = lambda x: [IN_FIELD if c == 1 else OUT_FIELD for c in x]
+        #for each edge get the index, species, IO_field type and vertex id
+        internal_edges = [(c,species[c], map_list(list(G._inc[:,c][G._inc[:,c]!=0])), list(np.where(G._inc[:,c]!=0)[0])) for c in range(G._inc.shape[1]) if G._inc[:,c][-1]==0]
+
+        internals = np.zeros((num_vertices, num_species,2 ), dtype=np.int)
+        for e in internal_edges: 
+            #print(e)
+            #this is a bit weird but I have split the edge in two leaving stubs (flags) on the respective vertices
+            #im making a big assumption here and that is that we always go out to the larger vertex so the last index is simple 0,1
+            internals[e[3][0]][e[1]][0] +=1
+            internals[e[3][1]][e[1]][1] +=1
+
+        #return internal_edges
+        return internals, residual
 
 
+
+##############################################
+def _combine(set_of_interactions):
+        def _merge(a,b): 
+            if a is None:return b
+            if b is None:return a
+            return a * b
+        return reduce(_merge, set_of_interactions, None)
+    
+def graph_permutations(primitives, loop_orders = [0,1], max_k=3):
+    if not isinstance(loop_orders, list):loop_orders = [loop_orders]
+    l = []   
+    for i in range(2,max_k+1):
+        for tup in list(itertools.permutations(primitives,i)):
+            res = _combine(list(tup))
+            if res.loops in loop_orders:
+                l.append(res)
+    #todo : define uniqueness and validity
+    return list(set(l))
+
+def distinct_loops(fgset,insist_on_same_residual=False):
+    #I think only the same residual makes sense because otherwise the external momenta are different? but then its the same graph so maybe not
+    d = {}
+    for f in fgset:
+        if f.loops < 1 or not composite_interaction_graph(f).is_1PI:continue
+        inv_res = f.residual_complement
+        inv_res.flags.writeable = False
+        h = hash(str(inv_res))
+        if h not in d:d[h] = []
+        d[h].append(f)
+    return d
+
+######################################################
