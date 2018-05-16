@@ -14,7 +14,7 @@ structure should then be
 
 global:
  session stuff - set styles and symbol labels etc. ill probably never implement this but someone could and pass to various classes as props
- graph_factory which initalises verties and graphs with global propagator info - otherwise would need to define it for each new graph
+ graph_factory which initializes vertices and graphs with global propagator info - otherwise would need to define it for each new graph
    - this would actually be easy to use as we effectively redefine vertex with new closed functions V(), G() etc. which behave as originals
 
 types:
