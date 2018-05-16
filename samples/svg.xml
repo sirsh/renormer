@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" x="0" y="0" width="240" height="120">\n   
+   <g fill="none" stroke="black" stroke-width="1.6" stroke-linecap="round">\n        
+    <line x1="0" y1="0" x2="40" y2="0" stroke="red" stroke-dasharray="None" stroke-width:2" transform=" translate(80,50) rotate(-30.0 0, 0 )" /> 
+    <line x1="0" y1="0" x2="40" y2="0" stroke="red" stroke-dasharray="None" stroke-width:2" transform=" translate(80,50) rotate(30.0 0, 0 )" /> 
+     <line x1="0" y1="0" x2="40" y2="0" stroke="red" stroke-dasharray="None" stroke-width:2" transform=" translate(80,50) rotate(-180.0 0, 0 )" /> \n  
+    </g>\n    
+      <circle cx="80" cy="50" r="2" stroke="black" stroke-width="1" fill="black" />\n   
+     </svg>
