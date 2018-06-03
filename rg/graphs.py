@@ -20,17 +20,20 @@ from . interaction import interaction as J, composite_interaction as G
 from . diagrams import diagram_set
 
 class composite_interaction_graph(object):
-    def __init__(self, comp_interaction,connect_inf=False):
+    def __init__(self, comp_interaction):
         self.ci = comp_interaction
         temp=self.ci.graph_dataframes()[1]
         self._edges = [d["edge"] for d in self.ci.edges]
         #todo - get the external vertices which will be connected to the infinity node
-        self._externals = [] if connect_inf == False else list(self.__gen_ex_vert__())
+        self._externals = list(self.__gen_ex_vert__())
+        
         #vids are the non 0 source or tarket in the external edges dataframe
         l = list(zip( temp[temp.internal==False].source, temp[temp.internal==False].target))
         l = [ l_[0] if l_[0] >= 0 else l_[1] for l_ in l ]  
         self._inc = self.__edges_to_incidence__(self._edges, l)
-     
+        self._internal_edges =  np.where(self._inc[-1]==0)[0]
+        self._external_edges =  np.where(self._inc[-1]!=0)[0]
+        
     def __gen_ex_vert__(self):
         """Im not sure what the definition of external vertices in our diagrams is yet - it may be either source and sink or those in the residual"""
         for i, v in enumerate(self.ci.tensor):
@@ -65,9 +68,7 @@ class composite_interaction_graph(object):
         K = cpropagator.integrate(propagators)
         PI = kpropagator(K)
         return PI.gamma_integral()
-        
-      
-    
+            
     @property
     def incident_matrix(self):return self._inc
     
@@ -103,63 +104,86 @@ class composite_interaction_graph(object):
 
 
     def symbol_laplacian(self):
-        external_start_index=-1
-        edges = self._edges
+        """
+        Given the incidence matrix, we have edges (columns) joining vertices (rows)
+        Here the edge index determines the symbol while the laplacian is a matrix of size |V|x|V|
+        We go through the inc matrix for each vertex, and we get the edge id and the location of the other vertex
+        """
         inc = self._inc
-        external_edges = self._externals
-        if len(external_edges): external_start_index = len(edges) +1 - len(external_edges)
-        #print("external edges start at", external_start_index)
+        external_edges =  np.where(inc[-1]!=0)[0]
         """This computes the input of Kirchoff polymial (reduced laplacian) in symbol form"""
         def _int_to_dummy(i):  
-            if i >= external_start_index and external_start_index > 0: return Symbol("z")# +str(i)for testing we might care about which z
-            return Symbol("x"+str(i))
+            if i in external_edges: return Symbol("z")
+            return Symbol("x"+str(i+1))
+        
+        def corresponding_vertices(inc, v):
+            """returns a tuple (edge_id, other_vertex_id)"""
+            for e in np.nonzero(inc[v])[0]:  yield (e, list(set(np.nonzero(inc[:,e])[0]) - set([v]))[0])
+
         def _symbol_row_(vec,v):
             _ret = [0 for i in range(inc.shape[0])]
-            entries = list(np.where(vec!=0)[0])
-            """take the incident matrix and use the zero indexed enries to create dummy variables"""
-            _ret[v] = reduce(add,[_int_to_dummy(i+1) for i in entries],0)
-            #foreach entries, look at the inc column and find my adjoint
-            for e in entries:
-                adj = list(set(np.nonzero(inc[:,e])[0]) - set([v]))[0]
-                _ret[adj] = -1*_int_to_dummy(1*(e+1))         
+            others = list(corresponding_vertices(inc,v))
+            ##all the edges are added to the diagnal where they point to another vertex
+            _ret[v] = reduce(add,[_int_to_dummy(t[0]) for t in others],0)
+            #and the other vertex location is marked with edge symbol too
+            for e,v in others: _ret[v] = -1*_int_to_dummy(1*(e))         
             return _ret
 
         return Matrix([_symbol_row_(row,v) for v, row in enumerate(inc)])
 
     def kirchhoff_poly(self):
-        inc = self._inc
-        edges = self._edges, 
-        infinity_connect_list=self._externals
-        external_edges = edges[-len(infinity_connect_list):] if len(infinity_connect_list) > 0 else []
         lap = self.symbol_laplacian()
         reduced = self.sym_i_cofactor(lap)
         P= reduced.det(method='berkowitz')
         return collect(expand(P),Symbol("z"))
 
-    def graph_polynomials(self, include_masses=False):
-        max_ind = len(self._edges)
-        S = self.kirchhoff_poly()
-        U = self.__W__(S, order=1, max_index=max_ind)
-        F0 = self.__W__(S, order=2, max_index=max_ind)
-        NCM = self.compute_neg_cut_momenta()
-        SUM_MASS = 0 if include_masses == False else reduce(add, [Symbol("x"+str(i)) *Symbol("m"+str(i))**2 for i in range(1,max_index+1)],1)
-        F = F0
-        return U, NCM * F + U * SUM_MASS
+    def _polys_as_edge_index_tuples_(self, Ps):
+        def reduction(P):  return [tuple([ int(a.name[1:]) for a in term.atoms() ])  for term in P.args ]
+        return (reduction(Ps[0]),reduction(Ps[1]) )
 
-    def __W__(self, P, max_index, order = 1):
+    def graph_polynomials(self, as_tuple_index=False, cut_momenta=None,masses=None):
+        S = self.kirchhoff_poly()
+        U = self.__W__(S, order=1)
+        F0 = self.__W__(S, order=2)
+
+        #this is just for convenience of mapping to other things e.g. plotting forests
+        if as_tuple_index: return self._polys_as_edge_index_tuples_( (U,F0) )
+        if masses == None:masses = [1 for i in range(len(self._internal_edges))]
+        try:
+            if cut_momenta == None:cut_momenta = [1 for i in range(len(F0.as_ordered_terms()))]
+            F0 = reduce(add,[F0.as_ordered_terms()[i]*m for i, m in enumerate(cut_momenta) ],0)
+        except:
+            #tis is temporary because i do not know how to handle yet
+            pass
+        
+        mass_sum = reduce(add, [Symbol("x"+str(i+1)) * masses[i]  for i in self._internal_edges], 0)
+        
+        #multiple F0 terms by the corresponding cut momentum
+        
+        F = F0 + U*mass_sum
+        return U, F0, F
+
+    def __W__(self, P, order = 1):
         """This is a helper function that computes the inverted coefficients for the kirchoff polymial
         """
+        ##for the polynomials this is important - the divisor is the number of internal edges we know about
+        max_index = len(np.where(self._inc[-1]==0)[0])
+        #this is something i need to think about - there is a coefficient of the polynomial actually which i know how to deal with
+        def _remove_constants_(s):
+            first = s.args[0]
+ 
+            return s if not first.is_constant() else s/first
+        
         def _inversion_(S):
             """This is actually a set complement"""
             pre_term = reduce(mul, [Symbol("x"+str(i)) for i in range(1,max_index+1)],1)
-            return reduce(add , [((1/t)*pre_term).as_content_primitive()[-1] for t in S.args ], 0)
+         
+            return reduce(add , [_remove_constants_(pre_term/t) for t in S.as_ordered_terms() ], 0)
 
         return  _inversion_(P.coeff(Symbol("z"),order))
 
     def compute_neg_cut_momenta(self):
         return 1
-    
-    
     
     def should_toggle_edge_columns(arr, axis=0, prefactor=-1):
         mask = arr!=0
