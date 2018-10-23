@@ -145,10 +145,8 @@ class interaction(object):
         else:  return functools.reduce(operator.mul, self.in_fields + self.out_fields, 1)
         
     def __repr__(self):  return self._repr_latex_()
-    
     def _repr_latex_(self):
         init_printing(use_latex='mathjax')
-        
         return latex(self.display(False),  mode='inline')
     
 #     def _repr_html_(self):
