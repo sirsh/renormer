@@ -171,8 +171,7 @@ class composition_diagram():
             _body += """<path d="{}" stroke="{}"/>""".format(composition_diagram._describeArc(e["sangle"],e["eangle"]),colours[e["species"]])
         return  """<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" x="{1}" y="{2}" width="200" height="180">
       <g fill="none" stroke="black" stroke-width="1.6" stroke-linecap="round"> {0}  </g> </svg>""".format(_body, self.x, self.y)
-  
-    
+
 #some way to control the scale of the sub diagrams e.g. the loops (and maybe other parameters being passed through as dicts
 class diagram_set(object):
     def __init__(self, collection,offset=40,compact=False):
