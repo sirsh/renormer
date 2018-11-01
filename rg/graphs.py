@@ -345,3 +345,5 @@ def distinct_loops(fgset,insist_on_same_residual=False):
     return d
 
 ######################################################
+# some interesting things for later
+#https://www.math.ucdavis.edu/~amoore/code/kauffmanstates/kauffmanstates.py
