@@ -137,10 +137,11 @@ class ring_diagram(object):
     def edge_colour(self,pid=None):
         #this is temporary - we need an entire style format but not sure how i want to do it yet
         if pid != None:
-            
-            if self._inc.species_vector is not None and len(self._inc.species_vector) > pid and self._inc.species_vector[pid] < len(colours):
-                return  colours[self._inc.species_vector[pid]]
-                
+            try:
+                if self._inc.species_vector is not None and len(self._inc.species_vector) > pid and self._inc.species_vector[pid] < len(colours):
+                    return  colours[self._inc.species_vector[pid]]
+            except:
+                return "black"
         return "black"
     
     def __describeArc__(self, startAngle, endAngle, radius,pid=None):
@@ -228,16 +229,21 @@ class ring_diagram(object):
         for p in MD.keys():
             for q in self._metadata.keys():
                 if p >q:continue #diag
+                #e.g. a=0 and b=1 are connected like (0,-1) if b->a
                 pq_cons = list(inc.get_all_connections(p,q))
                 for i, edge_meta in enumerate(pq_cons):
-                    a,b = (p,q) if edge_meta[-1] == 1 else (q,p) #check convention
+                    a,b = (p,q) if edge_meta[-1] == 1 else (q,p) #check convention - this is only from the get_all_connections function
                     edge = [a,b]
                     edge_id = edge_meta[0]
+                    
+                    #print("i a,b, is some ring", i ,a, b, same_ring(a,b))
                     
                     if i > 1 or not same_ring(a,b): #max ring links or on a different ring
                         self.body +=self.get_line([self._metadata[a]["point"][0],self._metadata[a]["point"][1],
                                        self._metadata[b]["point"][0],self._metadata[b]["point"][1]],
                                        pid=edge_id)
+                        
+                        #print("direct line for ", a, b)
                     else: 
                         angles = [MD[a]["angle"],MD[b]["angle"]]
                         if i == 1:
@@ -247,7 +253,7 @@ class ring_diagram(object):
                         if angles[0] - angles[1] >180 and angles[0] == 360:angles[0]=0
                         if angles[1] - angles[0] >180 and angles[1] == 360:angles[1]=0
                         
-                        #print(edge_id,angles,i)
+                        #print("edge and anggle for source", edge_id,angles,i)
                         self.body += self.__describeArc__(*angles, MD[a]["radius"], pid=edge_id )
 
     def __display__(self):

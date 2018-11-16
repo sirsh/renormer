@@ -3,6 +3,7 @@
 # RG can have global species colours, species labels, etc.
 #having dones this it is possible to create a propagator matrix format to construct propagators the vector way
 
+#implement edge sets by wrapping set and overloading /set notation
 
 #temp: later pick your objects - just is just to prototype
 from sympy import *
@@ -13,30 +14,98 @@ import math
 import pandas as pd
 import numpy as np
 
+from .. import _sum_, _product_
+
 #todo: many objects that could be preloaded once that arre not such as the dataframe adjacency with metadata (filterable by trees and cicuit edge ids)
 
+class _delta_(object):
+    def __init__(self, name, ids, signs):
+        self._name = name
+        self._d = Symbol("delta_"+str(ids[0]))
+        self._vec = symbols(" ".join([name+"_"+str(abs(v)) for v in ids]))
+        signed = lambda v : [int(signs[i]) * Symbol(name+"_"+str(v)) for i,v in enumerate(ids)]
+        self._signed = signed(self._vec)
+        self._exp = functools.reduce(operator.add, self._signed, 0)
+        self._rep = Function("delta_"+str(ids[0]))(self._exp)
+    def __repr__(self):  return self._repr_latex_()
+    def _repr_latex_(self): return latex(self._rep,  mode='inline')
+    def __call__(self, i):
+        return solve(self._exp, Symbol(self._name+"_"+(str(i))))[0]
+    
+    @property
+    def value(self):return self._rep
+        
+    def apply(self,exp):
+        term = self._signed[0]
+        s = solve(self._exp, term)[0]
+        return exp.subs({term : s})
+    
+class internal_edge_set(object):
+    def __init__(self, inc):
+        self.inc = inc
+        self.T = list(inc.spanning_trees.iloc[0].values)
+        self.Tc = inc.edge_complement(self.T)
+        self.G = list(range(len(inc.edges)))   
+        
+    @property 
+    def I_S(self):
+        mat = self.inc.copy()
+        mat[:,self.Tc] = 0
+        return mat[:-1,self.G]
+    
+    @property 
+    def IC_S(self):
+        mat = self.inc.copy()
+        mat[:,self.T] = 0
+        return mat[:-1,self.G]
+    
+    @property 
+    def II_S(self):
+        mat = self.inc.copy()
+        return mat[:-1,self.T]
+    
+    @property 
+    def IIC_S(self):
+        mat = self.inc.copy()
+        return mat[:-1,self.Tc]
+    
+    @property
+    def X(self):  return np.round(-1*np.matmul( np.linalg.pinv(self.I_S),(self.IC_S) )).astype(int)
+    
+    @property
+    def X_delta(self): 
+        for i, col in enumerate(self.X.T):
+            m = list(np.nonzero(col)[0])
+            if len(m) > 0: yield _delta_("alpha", [i]+m, [1]+list(col[m]))
+    
 class incidence_matrix(np.ndarray):  
     #things to watch out for - handling multiple edges
     #todo allow a dictionary of letters maybe for vertices to make it easier to init and maybe consider not using sizes
     #alternative loading model where we do not compute the k_matrix?
     #alternative where we do not add the edge count and vertex count - seems a bit inconvenient
-    def __new__(self, edge_count, vertex_count, edges=[],external_vertices=[], species_vector=None):
+    def __new__(self, edge_count=None, vertex_count=None, edges=[],external_vertices=[], species_vector=None):
+        if edge_count == None: edge_count = len(edges)
+        if vertex_count == None: vertex_count = len(np.unique(np.array(edges).flatten()))    
+            
         size = (vertex_count+ (1 if len(external_vertices) > 0 else  0),edge_count+len(external_vertices))
         obj = super(incidence_matrix, self).__new__(self, size, np.int)  
         obj[:] = 0 
+        obj._num_internal_edges = len(edges)
         obj.add_edges(edges + [[-1,ev] for ev in external_vertices])
         obj._external_vertices = external_vertices
         obj._internal_vertices = list(set(list(range(vertex_count))) - set(external_vertices))
         
         obj._kmatrix = obj.kirchhoff
         obj._betti_1 = obj._kmatrix.degree()#~ whats the relatioship?
-    
-        obj._num_internal_edges = len(edges)
-    
+
         obj.species_vector = species_vector
         
         return obj
-         
+    
+    #add external edge and internal edges sets for convenience
+    
+    @property
+    def _internal_edge_set_(self):return internal_edge_set(self)
         
     def ensure_edge_directions(self,d):
         """Supply a dictoinary with edge id and vertex e.g. { 0: [1,2]} means edge 0 takes vertex 1 to vertex 2"""
@@ -57,7 +126,7 @@ class incidence_matrix(np.ndarray):
             
     def try_directed_edge_index(self,a,b):
         """
-        checks all the columns (edges) to see if there is an edge that starts at a(1) and endgs at b(-1)
+        checks all the columns (edges) to see if there is an edge that starts at a(1) and ends at b(-1)
         """
         for i,r in enumerate(self.T):
             if(r[a]==1) and (r[b]==-1):
@@ -86,8 +155,12 @@ class incidence_matrix(np.ndarray):
                 if _v not in items: items.append(_v)
         return items
         
-    def get_incident_edges(self, v):return np.nonzero(self[v])[0]
-        
+    def get_incident_edges(self, v,internal=False):
+        all_edges = np.nonzero(self[v])[0]
+        if internal:        
+            return [e for e in all_edges if e < self._num_internal_edges]
+        return all_edges
+    
     def get_coincident_vertices(self, v,exclusions = []):
         #these are the data columns for which v has edge data
         v_inc_frame = self[:,np.where(self[v]!=0)[0]]
@@ -290,4 +363,31 @@ class incidence_matrix(np.ndarray):
 
         return edge_basis_map
 
+    
+    #TODO check for vanishing momentum on 2-forests
+    def _symanzik_pols_(self, symbolic=False, reduce=False, apply_deltas=False,use_zero_mass=False):
+    
+        #todo finish second polynomaisl which is U*mass_sum + sum of forests multiplied by the momentum across the cut edges
+        delta_functions = internal_edge_set(self).X_delta
+        
+        first = [self.edge_complement(k) for k in self.k_forests(order=-1)]
+        #needs to have at least three vertices for this to make sense - otherwise no way to disconect the vertices and still keep an edge
+        second = [self.edge_complement(k) for k in self.k_forests(order=-2)]
+        
+        to_alpha_symbols = lambda l : [Symbol("alpha_"+str(i)) for i in l]
+        
+        if symbolic:
+            a,b= [to_alpha_symbols(t) for t in first],[to_alpha_symbols(t) for t in second] 
+            massum = _sum_([Symbol("alpha_"+str(i))*Symbol("m_"+str(i)) for i in range(len(self.edges))]) if not use_zero_mass else 0 
+            if reduce: 
+                a,b= [_product_(l) for l in a], [_product_(l) * Symbol("\hat{p}") for l in b]
+                a,b = _sum_(a),_sum_(b) 
+
+                b = a*massum + b
+                if apply_deltas:
+                    for d in delta_functions: a,b = d.apply(a),d.apply(b)  
+
+                return a,b
+            return a,b
+        return first,second 
 
