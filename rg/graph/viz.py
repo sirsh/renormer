@@ -11,7 +11,7 @@ init_printing()
 from . import colours
 
 class arc(object):
-    def __init__(self, angles, radius,center=None,size=None,pid=None,is_cut_line=False,colour=None):
+    def __init__(self, angles, radius,center=None,size=None,pid=None,is_cut_line=False,colour=None, is_directed=True):
         self.pid = pid
         self.radius = radius
         object_radius = 20 + radius
@@ -20,6 +20,7 @@ class arc(object):
         self.body = ""
         self.header =  arc.get_header()
         self.colour = "black" if colour == None else colour
+        self.is_directed = is_directed
         
         #print(pid, ":angles for pid", angles)
         startAngle,endAngle = angles[0],angles[1]    
@@ -29,13 +30,22 @@ class arc(object):
         #self.body+= """<circle cx="{0}" cy="{1}" r="2" stroke="black" stroke-width="1" fill="red" /> """.format(*self.center)
             
         self.body+= self.__describeArc__(startAngle, endAngle)
-        if not self._is_cut_line:
-            self.body+= self.__describeArc__(startAngle, mid_angle, decorations="marker-end='url(#arrow)'")
+        if not self._is_cut_line and is_directed:
+            arrow = "arrow" if self.colour not in ["grey", "orange"] else "arrow"+self.colour
+         
+            self.body+= self.__describeArc__(startAngle, mid_angle, decorations="marker-end='url(#{})'".format(arrow))
            
     @staticmethod
     def get_header():
-                 return """<defs><marker id="arrow"  markerUnits="strokeWidth" markerWidth='5' markerHeight='8' refX='0' refY='2' orient="auto">
-                                      <path d="M0,0 V4 L2,2 Z" style="fill: #000000;" /> </marker></defs>"""
+        #temp - need to redo this like so much else
+                 return """<defs><marker id="arrow"  markerUnits="strokeWidth" markerWidth='5' markerHeight='8' refX='0' refY='2' orient="auto" stroke="black" >
+                                      <path d="M0,0 V4 L2,2 Z" style="fill: #000000;" /> </marker>
+                                      <marker id="arrowgrey"  markerUnits="strokeWidth" markerWidth='5' markerHeight='8' refX='0' refY='2' orient="auto" stroke="grey" >
+                                      <path d="M0,0 V4 L2,2 Z" style="fill: #000000;" /> </marker>
+                                      <marker id="arroworange"  markerUnits="strokeWidth" markerWidth='5' markerHeight='8' refX='0' refY='2' orient="auto" stroke="orange" >
+                                      <path d="M0,0 V4 L2,2 Z" style="fill: #000000;" /> </marker>
+                                      </defs>"""
+        
      
     
     def __polarToCartesian__(self, angleInDegrees, radius, center):
@@ -94,9 +104,13 @@ class ring_diagram(object):
         self._vertex_depths = [v[1] for v in list(self._inc.vertex_hierarchy())][1:]
         self._metadata = {}
         self.body = ""
+        self._is_directed = True if "is_directed" not in options else options["is_directed"]
         
         #for spanning tree - this is not general enough but quick fix
         self._dashed_edges = [] if not "cut_edges" in options else options["cut_edges"]
+        
+        if self._inc.shape[0] == 2:# if there is only one vertex then default to show ex edges
+            self._options["show_ex_edges"] = True
             
     @property
     def external_vertices(self):pass
@@ -124,11 +138,15 @@ class ring_diagram(object):
         m,accepted = 1,None
         for offset in [angle]:
             proposed = [self.__polarToCartesian__( (i+1)*angle, radius,center) for i, v in enumerate(vset)]
+            proposed_text = [self.__polarToCartesian__( (i+1)*angle, radius+10,center) for i, v in enumerate(vset)]
             _m = self.__measure_inter_layer_chords__(prev_layer_connections, proposed)
             if m ==-1 or _m < m: 
                 accepted, m = proposed, _m
                 for i,v in enumerate(vset):
+
                     self.__set_vertex_property__(v, "point", [proposed[i][0],proposed[i][1]])
+                    self.__set_vertex_property__(v, "text_point", [proposed_text[i][0],proposed_text[i][1]])
+                    
                     self.__set_vertex_property__(v, "angle", proposed[i][-1])
                     self.__set_vertex_property__(v, "radius", radius)
                             
@@ -146,26 +164,9 @@ class ring_diagram(object):
     
     def __describeArc__(self, startAngle, endAngle, radius,pid=None):
         colour = self.edge_colour(pid)
-        return arc((startAngle,endAngle),radius, self._center,self._size, pid=pid, is_cut_line=(pid in self._dashed_edges),colour=colour).body    
-           
-#     def try_get_connecting_edges(self, v):
-#         #look up the metadata for v and get all edges that are adjacent to it that we know about
-#         #think about us and vs here - i may be mixing them up
-#         for u in self._inc.get_coincident_vertices(v):
-#             if u in self._metadata and v in self._metadata: 
-#                 _u,_v = u,v
-#                 #if the max length is exceeded, try to get a nice arc otherwise....
-#                 #max length is the length of the verticle chord connecting the bottom of one disk to the point on the outer disk          
-#                 pid = self._inc.try_directed_edge_index(_v,_u)
-#                 if pid == None: 
-#                     _u,_v = _v,_u #flip for drawing
-#                     pid = self._inc.try_directed_edge_index(_v,_u)
-                    
-#                 yield self.get_line([self._metadata[_u]["point"][0],
-#                                      self._metadata[_u]["point"][1],
-#                                      self._metadata[_v]["point"][0],
-#                                      self._metadata[_v]["point"][1]],
-#                                      pid=pid)
+        return arc((startAngle,endAngle),radius, self._center,self._size, pid=pid, 
+                   is_cut_line=(pid in self._dashed_edges),colour=colour,is_directed=self._is_directed).body    
+  
         
     def get_line(self, pts, dash_array=None,pid=None):
         
@@ -180,44 +181,19 @@ class ring_diagram(object):
         hl =""
         l = """<path d="M{0} {1} L {2} {3}" stroke="{4}" stroke-width="2px" {5} {6}  /> """.format(*pts, colour,pidattr,dasharray )
         #print(l)
-        if pid not in self._dashed_edges:#only display if not cut edge
-            hl = """<line x1="{0}" y1="{1}" x2="{2}" y2="{3}" stroke="{4}" stroke-width="2px"  {5} {6}  marker-end='url(#arrow)' />""".format(pts[0],
+        if pid not in self._dashed_edges and self._is_directed:#only display if not cut edge and it is a directed edge
+            arrow = "arrow" if colour not in ["grey", "orange"] else "arrow"+colour
+         
+            hl = """<line x1="{0}" y1="{1}" x2="{2}" y2="{3}" stroke="{4}" stroke-width="2px"  {5} {6}  marker-end='url(#{7})' />""".format(pts[0],
                                                                                                                                           pts[1], 
                                                                                                                                           midpoint[0], 
                                                                                                                                           midpoint[1], 
                                                                                                                                           colour,
                                                                                                                                           pidattr,
-                                                                                                                                          dasharray )
+                                                                                                                                          dasharray,
+                                                                                                                                          arrow)
         return l+hl
     
-#     def __edge_segments__(self,a,b,angle, radius, vset):
-#         #clean this up; assume that we have a vset but we dont know what the angles are
-#         #we assume that they are connected in a ring (works for multiple edge)?
-#         #the incidence matrix must start 1 and go -1 to check if the edge exists in that way as we have assumed a layout here
-#         """
-#         We always arrange vertices on disks separated by angles. Can only have vertices in [0,360]
-#         We assume that the id is the arrangment id in order and that a<b for normal sense
-#         if however b<a, then we have anticlockwise sense and we will change the angles for downstream reflection
-#         """
-#         #if there are multiple edges, then allow - otherwise restrict direction - wrapping because its a ring
-#         a,b = a%len(vset),b%len(vset)
-#         offset_angles = [self.__polarToCartesian__( (i+1)*angle, radius,self._center) for i, v in enumerate(vset)]
-        
-#         first = offset_angles[a][-1] % 360 # we should always start 
-#         second = offset_angles[b][-1] 
-        
-#         all_con = list(self._inc.get_all_connections(a,b))
-#         if len (all_con) > 0: print("mili edges detected")
-        
-#         pid = self._inc.try_directed_edge_index(vset[a],vset[b])
-#         if pid == None:
-#             a,b = b,a
-#             first,second = second,first
-#             pid = self._inc.try_directed_edge_index(vset[a],vset[b])
-
-#         cap = lambda x : 0 if x == 360 else x     
-#         if a< b: return (first,second), pid
-#         return (first,cap(second)), pid
 
     def arrange_edges(self): 
         inc = self._inc
@@ -232,7 +208,8 @@ class ring_diagram(object):
                 #e.g. a=0 and b=1 are connected like (0,-1) if b->a
                 pq_cons = list(inc.get_all_connections(p,q))
                 for i, edge_meta in enumerate(pq_cons):
-                    a,b = (p,q) if edge_meta[-1] == 1 else (q,p) #check convention - this is only from the get_all_connections function
+                    #-1 should be EXITING a
+                    a,b = (p,q) if edge_meta[-1] == -1 else (q,p) #check convention - this is only from the get_all_connections function
                     edge = [a,b]
                     edge_id = edge_meta[0]
                     
@@ -268,18 +245,57 @@ class ring_diagram(object):
         radii_margins = [20*(levels-(i)) for i in reversed(range(len(self._vertex_depths))) ]
         angles = [(360./len(v)) for v in self._vertex_depths]
 
+      
         for i, vset in enumerate(self._vertex_depths): 
             radius = self.radius-radii_margins[i]
-            for coord in self.__arrange__(angles[i],radius , vset):
-                self.body+= """<circle cx="{0}" cy="{1}" r="3" stroke="black" stroke-width="1" fill="black" /> """.format(*coord)
+            for vid, coord in enumerate(self.__arrange__(angles[i],radius , vset)):
+                vtext_coords = self._metadata[vid]["text_point"] if "text_point" in self._metadata[vid] else None
+                self.body+= """<circle cx="{0}" cy="{1}" r="3" stroke="black" stroke-width="1" fill="black"  /> """.format(*coord)
+                ##add vertext text - optionally
+                #self.body+= """ <text x="{0}" y="{1}" style="fill: #000000;stroke: none; font-size: 14px;" transform="rotate(-90,{0},{1}) translate(-7 5)">v{2}</text>""".format(*vtext_coords,vid)
         
-        self.arrange_edges()            
+                #get the star for this vertex and add all of the edges in the same arc without arrows for now
+                #S = self._inc.get_star(vid)
+                #ex_edges = S[S[:,-1]==-1][:,0]
+                #num_ex = len(ex_edges)
+                #sangle = angles[i] - (180-angles[i])
+                
+                #for j, e in enumerate(ex_edges):
+                #    offset_angle = j*(90./(num_ex+1))
+                #    pt1 = (coord[0], coord[1])
+                #    pt = self.__polarToCartesian__(offset_angle+sangle, 30, coord)[:2]
+                #    self.body +=self.get_line(pt1+pt) #pid=e
+                #go to the point at an angle
+                
+        
+        self.arrange_edges()    
+        
         if "show_labels" in self._options:
                 for e in range(len(self._inc.edges)):
                     self.body+= """<text x="10%" style="fill: #000000;stroke: none; font-size: 14px;" ><textPath xlink:href="#edge{0}">e{0}</textPath></text>""".format(e)
-                    
+          
+        if "show_ex_edges" in self._options: 
+            #self.arrange_external_edges()
+            #take the id rows from the residual - inc matrix knows what species these are
+            entering = self._inc.residual(exiting=False,sort=True)[:,0]
+            exiting =  self._inc.residual(entering=False,sort=True)[:,0]
+            for i, e in enumerate(entering):
+                angle = i*(180./(len(entering)+1))
+                pt = self.__polarToCartesian__(angle, 50,self._center)[:2]
+                self.body +=self.get_line(pt+self._center,pid=e)        
+                #print("entering", pt, "ang", angle)
+            for i, e in enumerate(exiting):
+                angle = 180+i*(180./(len(exiting)+1))
+                pt = self.__polarToCartesian__(angle, 50,self._center)[:2]
+                self.body +=self.get_line(self._center+pt,pid=e)
+                #print("exiting", pt, "ang", angle)
+         
+     
+        rotation = 90
+        if "add_rotation" in self._options:rotation+=self._options["add_rotation"]
+        
         return  """<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" x="{1}" y="{2}" width="{3}" height="{4}">
-      <g fill="none" stroke="black" stroke-width="1.6" stroke-linecap="round" transform="rotate(90,100,100)"> {0}  </g> </svg>""".format(self.body,  self.x, self.y, *self._size)
+      <g fill="none" stroke="black" stroke-width="1.6" stroke-linecap="round" transform="rotate({5},100,100)"> {0}  </g> </svg>""".format(self.body,  self.x, self.y, *self._size,rotation)
 
     #def __repr__(self):return self.__display__()           
     def __div2s__(self,n):
@@ -300,7 +316,7 @@ class ring_diagram(object):
                    
             
 class show_spanning_trees(object):
-    def __init__(self, inc_matrix, show_labels=False, max_width=None, min_split=5, alternate_background=True):
+    def __init__(self, inc_matrix, show_labels=False, max_width=None, min_split=5, alternate_background=True, is_directed=True):
         
         total_edges = len(inc_matrix.edges)
         
@@ -318,9 +334,9 @@ class show_spanning_trees(object):
             row = """<tr {}>""".format(style)
             for j in range(width):
                 if counter == len(edges_too_cut):break
-                o = options={"cut_edges": edges_too_cut[counter]}
+                o = options={"cut_edges": edges_too_cut[counter], "is_directed" : is_directed}
                 if show_labels: o["show_labels"] = True
-                rd = ring_diagram(inc_matrix.copy(), options=o)
+                rd = ring_diagram(inc_matrix, options=o)
                 row+="""<td>{}</td>""".format(rd.__display__() )
                 counter+=1
             row+= "</tr>"
@@ -330,4 +346,174 @@ class show_spanning_trees(object):
         
     def _repr_html_(self): return self.body
     
-   
+class star(ring_diagram):
+    def __init__(self, inc,vroot=0, options={}):
+        self.root = (0,0)
+        self._inc = inc
+        self.body = ""
+        self.radius = 35
+        self._dashed_edges = []
+        self._is_directed = True
+        self._vertex_depths = [0]
+        self.x = 0
+        self.y = 0
+        self._size=(300,150) if "size" not in options else options["size"]
+        self.star_svg(vroot, center=(50,50))
+        self._options= options
+        
+    def star_svg(self,vid,center,pid=None):
+        v_pseudo_residual = self._inc.get_star(vid)
+        entering = v_pseudo_residual[v_pseudo_residual[:,1]==1]
+        exiting =  v_pseudo_residual[v_pseudo_residual[:,1]==-1]
+        #sort so that we do internal links first
+        exiting = exiting[exiting[:,-1].argsort()][::-1]
+        
+        for i, e in enumerate(entering[:,0]):
+            angle = i*(180./(len(entering)+1))
+            pt = self.__polarToCartesian__(angle, self.radius,center)[:2]
+            self.body +=self.get_line(pt+center,pid=e)        
+            #print("entering", pt, "ang", angle)
+
+        for i, e in enumerate(exiting[:,0]):
+            pie_size = 180./(len(exiting)+1)
+            angle = 180+((i)*pie_size)
+            pt = self.__polarToCartesian__(angle, self.radius,center)[:2]    
+            self.update_bounds(pt)
+            self.body +=self.get_line(center+pt,pid=e)
+            #print("exiting", pt, "ang", angle)
+            #if there is an internal v at the of e, then render that do
+            ch = exiting[i][-1]
+            if ch != -1:
+                cpt = self.__polarToCartesian__(angle, 2*self.radius,center)[:2]
+                self.star_svg(ch, center=cpt)
+                
+    #todo for dynamic diagrams, we should determine the size and center: center used for rotos
+    def update_bounds(self,pt):
+        pass
+    
+    #[0,15,20, 45, (60), 90] -> [0,15,20, 45, (58), 90]
+    #[0,2,4,pid,3,1] - > [1,0,2,4,pid,3]
+    def __shift_to__(l,p,i):
+        _i = l.index(p)
+        shift =  (i - _i) % len(l)
+        return l[-shift:]+l[:-shift] 
+
+    #def __get_star_children__(S):  return S[S[:,1]==-1]
+        
+    def __display__(self):
+        rotation = 90 if "extra_rotation" not in self._options else 90 + self._options["extra_rotation"]
+        fstring = """<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" x="{1}" y="{2}" width="{3}" height="{4}">
+      <g fill="none" stroke="black" stroke-width="1.6" stroke-linecap="round" transform="rotate({5},{6},{7})"> {0}  </g> </svg>"""
+        return fstring.format(self.body,  self.x, self.y,*self._size,rotation, self._size[0]/2.,self._size[0]/2.)
+    
+        return self.body
+        
+        
+#class melon_graph(ring_diagram):
+#    def __init__(self,left_angles = [], right_angles =[], mids = []):
+#        self.x = 10
+#        self.y =10
+#        self._size = (200,200)
+#        self._dashed_edges = [0]
+#        self.body = ""
+#        self._is_directed = False
+#        self.left_angles = left_angles
+#       self.right_angles= right_angles
+#       self.mids = mids
+##        
+#    def __display__(self, ):      
+#        self.body += arc((135,45),50, (10,100) ,self._size,  is_cut_line=True,colour="black",is_directed=False).body    
+#        self.body += arc((225,320),50, (80,100) ,self._size,  is_cut_line=True,colour="black",is_directed=False).body          
+#        self.body +=self.get_line((30,64, 60,64), pid=1 )
+#        self.body +=self.get_line((44,70, 45,140), pid=0 )
+#        self.body+= """<circle cx="{0}" cy="{1}" r="3" stroke="black" stroke-width="1" fill="black"  /> """.format(44,64)        
+#        proposed = self.__polarToCartesian__( 135, 50,(10,100)) 
+#        self.body+= """<circle cx="{0}" cy="{1}" r="3" stroke="black" stroke-width="1" fill="black"  /> """.format(*proposed)
+#                
+#        for a in self.right_angles:
+#            if a < 0:  self.body+= """<circle cx="{0}" cy="{1}" r="6" stroke="red" stroke-width="2" fill="none" stroke-dasharray='1,3' /> """.format(*self.__polarToCartesian__( abs(a), 50,(10,100)) #
+#            self.body+= """<circle cx="{0}" cy="{1}" r="2" stroke="black" stroke-width="1" fill="black"  /> """.format(*self.__polarToCartesian__( abs(a), 50,(10,100)) )
+#        
+#        for a in self.left_angles:
+#            if a < 0: self.body+= """<circle cx="{0}" cy="{1}" r="6" stroke="red" stroke-width="2" fill="none" stroke-dasharray='1,3' /> """.format(*self.__polarToCartesian__( abs(a), 50,(80,100)) )
+#            self.body+= """<circle cx="{0}" cy="{1}" r="2" stroke="black" stroke-width="2" fill="black"  /> """.format(*self.__polarToCartesian__( abs(a), 51,(80,100)) ) 
+#        for a in self.mids: self.body+= """<circle cx="{0}" cy="{1}" r="2" stroke="black" stroke-width="2" fill="black"  /> """.format(44.5,a)
+#        rotation = 0
+#        return  """<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" x="{1}" y="{2}" width="{3}" height="{4}">
+#      <g fill="none" stroke="black" stroke-width="1.6" stroke-linecap="round" transform="rotate({5},100,100)"> {0}  </g> </svg>""".format(self.body,  self.x, self.y, *self._size,rotation)
+    
+#    def _repr_html_(self): return self.__display__()
+    
+#melon_graph(right_angles = [105,-80], left_angles=[255], mids=[100])
+#melon_graph( left_angles=[270], mids=[100])
+#melon_graph( left_angles=[285,-250], mids=[])
+
+
+#class simple_ring_graph(ring_diagram):
+#     def __init__(self,circ_dots = [], line_dots = [], is_contracted=True):
+#         self.body=""
+#         self._dashed_edges = [0]
+#         self.circ_dots = circ_dots
+#         self.line_dots = line_dots
+#         self.is_contracted = is_contracted
+#         self._is_directed=False
+#         line_dots += [0, 60]
+#         if not is_contracted: circ_dots += [90,270]
+        
+#     def __display__(self, ):      
+#         rad = 30
+#         center = (100,100)
+#         dashed = "stroke-dasharray='1,5'" if self.is_contracted else ""
+#         self.body+= """<circle cx="{0}" cy="{1}" r="{2}" stroke="black" stroke-width="2" fill="none" {3} /> """.format(100,100,rad,dashed)
+#         self.body +=self.get_line((100,100-rad, 100,100+rad ), pid=0 if dashed else 1 )
+        
+#         for a in self.circ_dots:
+            
+#             pt= self.__polarToCartesian__(abs(a), rad, center)     
+#             if a < 0: self.body+= """<circle cx="{0}" cy="{1}" r="4.5" stroke="red" stroke-width="1" fill="none" /> """.format(*pt)
+#             self.body+= """<circle cx="{0}" cy="{1}" r="2.5" stroke="black" stroke-width="2" fill="black" /> """.format(*pt)
+        
+#         for a in self.line_dots:
+#             if a < 0: self.body+= """<circle cx="{0}" cy="{1}" r="4.5" stroke="red" stroke-width="1" fill="none" /> """.format(100,100-rad+abs(a))
+#             self.body+= """<circle cx="{0}" cy="{1}" r="2.5" stroke="black" stroke-width="2" fill="black" /> """.format(100,100-rad+abs(a))
+          
+#         if not self.is_contracted:
+#             self.body += """<text x="65" y="75" style="fill: #000000;stroke: none; font-size: 12px;">k1</text>"""
+#             self.body += """<text x="125" y="75" style="fill: #000000;stroke: none; font-size: 12px;">k2</text>"""  
+#             self.body += """<text x="60" y="130" style="fill: #000000;stroke: none; font-size: 12px;">e3</text>"""
+#             self.body += """<text x="125" y="130" style="fill: #000000;stroke: none; font-size: 12px;">e4</text>"""   
+#             self.body += """<text x="102" y="110" style="fill: #000000;stroke: none; font-size: 12px;">e5</text>"""
+        
+        
+#         if self.is_contracted:
+#             self.body +=self.get_line((80,100-rad, 120,100-rad ) )
+#         else:
+#             self.body +=self.get_line((100-rad-20,100, 100-rad,100 ) )
+#             self.body +=self.get_line((100+rad+20,100, 100+rad,100 ) )
+            
+            
+#         rotation = 0
+#         return  """<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" x="{1}" y="{2}" width="{3}" height="{4}">
+#           <g fill="none" stroke="black" stroke-width="1.6" stroke-linecap="round" transform="rotate({5},100,100)"> {0}  </g> </svg>""".format(self.body,  10, 10, 200,200 ,rotation)
+    
+#     def _repr_html_(self): return self.__display__()
+    
+# simple_ring_graph(is_contracted=False, circ_dots=[320, 225])
+# simple_ring_graph(is_contracted=False, circ_dots=[320, 135])
+# simple_ring_graph(is_contracted=False, circ_dots=[320], line_dots=[30])
+# simple_ring_graph(is_contracted=False, circ_dots=[45,135], line_dots=[])
+# simple_ring_graph(is_contracted=False, circ_dots=[45,225], line_dots=[])
+# simple_ring_graph(is_contracted=True, circ_dots=[270, -225])
+# simple_ring_graph(is_contracted=True, circ_dots=[270, ], line_dots=[-30])
+# simple_ring_graph(is_contracted=True, circ_dots=[90, -125])
+# simple_ring_graph(is_contracted=True, circ_dots=[90, ], line_dots=[-30])
+# simple_ring_graph(is_contracted=True, circ_dots=[270, ], line_dots=[-30])
+# simple_ring_graph(is_contracted=True, circ_dots=[270, -90], line_dots=[])
+# simple_ring_graph(is_contracted=True, circ_dots=[-90, ], line_dots=[30])
+# simple_ring_graph(is_contracted=True, circ_dots=[ ], line_dots=[30, -45])
+# simple_ring_graph(is_contracted=False, circ_dots=[135], line_dots=[30])
+# simple_ring_graph(is_contracted=False, circ_dots=[225], line_dots=[30])
+# simple_ring_graph(is_contracted=True, circ_dots=[270,90])
+# simple_ring_graph(is_contracted=True, circ_dots=[120,60])
+# simple_ring_graph(is_contracted=True, circ_dots=[360-60,360-120])
+# simple_ring_graph(is_contracted=True, circ_dots=[270],line_dots=[30])

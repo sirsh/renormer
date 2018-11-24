@@ -100,6 +100,9 @@ def set_circuit_flow(inc_mat, circ, entrainment={} ):
     circ_evs,edge_permutation = _ensure_edge_path_(circ_evs,edge_ids=circ)
     inc_mat.ensure_edge_directions(dict(zip(edge_permutation, circ_evs)))
 
+    
+#todo: important to update this to deal with arbitrary external vertices 
+#need to make sure the external edges which I ignore here hve the correct flow
 def set_source_sink_flow(self, circ=None, rem_edges = []):
     "circ added for backwards compat"
     #get a forest cut

@@ -16,6 +16,9 @@ import numpy as np
 
 from .. import _sum_, _product_
 
+
+EXITING = -1
+ENTERING = 1
 #todo: many objects that could be preloaded once that arre not such as the dataframe adjacency with metadata (filterable by trees and cicuit edge ids)
 
 class _delta_(object):
@@ -84,14 +87,25 @@ class incidence_matrix(np.ndarray):
     #alternative loading model where we do not compute the k_matrix?
     #alternative where we do not add the edge count and vertex count - seems a bit inconvenient
     def __new__(self, edge_count=None, vertex_count=None, edges=[],external_vertices=[], species_vector=None):
-        if edge_count == None: edge_count = len(edges)
-        if vertex_count == None: vertex_count = len(np.unique(np.array(edges).flatten()))    
-            
-        size = (vertex_count+ (1 if len(external_vertices) > 0 else  0),edge_count+len(external_vertices))
+        #parse
+        internal_edges = [e for e in edges if  -1 not in e]
+        external_edges =  [e for e in edges if -1 in e]
+        if len(external_edges) ==0 and len (external_vertices) > 0: 
+            external_edges += [[-1,v] for v in external_vertices]
+            edges = internal_edges + external_edges
+        vertices = [v for v in np.unique(np.array(edges).flatten()) if v != -1]
+        external_vertices = [v for v in np.unique(np.array(external_edges).flatten()) if v != -1]
+        edge_count = len(edges)
+        vertex_count = len(vertices)    
+        size = (len(vertices)+1,len(edges))
+        
+        #build
         obj = super(incidence_matrix, self).__new__(self, size, np.int)  
         obj[:] = 0 
-        obj._num_internal_edges = len(edges)
-        obj.add_edges(edges + [[-1,ev] for ev in external_vertices])
+        obj._num_internal_edges = len(internal_edges)
+        
+        obj.add_edges(edges)
+        
         obj._external_vertices = external_vertices
         obj._internal_vertices = list(set(list(range(vertex_count))) - set(external_vertices))
         
@@ -104,12 +118,86 @@ class incidence_matrix(np.ndarray):
     
     #add external edge and internal edges sets for convenience
     
+    @property #the last row determines if the edge is connected to vinty i.e. external
+    def num_internal_edges(self):len(np.where(self[-1] == 0)[0])
+        
+    #for testing it would be good to return this in incidence matrix format 
+    def get_star(self,vid):
+        star_links = {}
+        for i,e in enumerate(self.T):
+            if e[-1] == 0: star_links[i] = list(e)
+        star_links
+        m = np.zeros(self.shape,np.int)
+        for k in star_links: m[:,k] = star_links[k]
+
+        my_edges = self.get_incident_edges(vid)
+        targets = []
+        vs = self.shape[0] -1
+        for v in self[:,my_edges].T:
+            targets.append([ c if c < vs else -1 for c in np.nonzero(v)[0] if c != vid][0])
+
+        return np.array(list(zip(my_edges,list(self[:,my_edges][vid]),targets))) 
+
+    
+    def residual_matrix(self):
+        redges = []
+        species = []
+        for i,e in enumerate(self.T):
+            if e[-1] == 1: redges.append([0,-1])
+            if e[-1] == -1: redges.append([-1,0])
+            if self.species_vector != None:
+                species.append(self.species_vector[i])
+        return incidence_matrix(edges=redges, species_vector=species if len(species)>0 else None)
+        
+        
+    def residual(self, exiting=True, entering=True, sort=False, as_tensor=False):
+        
+        def _residual_tensor_(r,n=2):
+            """
+              Create a tensor for this direction convention <----
+                              [ [ species0_out, species0_in],
+                                [ species1_out, species1_in],
+                                ...
+                              ]
+             #for now i harcode the maximum species which may not be known to graph but for my scope 2 is enough for now
+            """
+            species = np.unique(r[:,-1])
+            n = np.maximum(n, len(species))
+            t = np.zeros((n,2),np.int)
+            for row in r:
+                index = 1 if row[1] == 1 else 0
+                t[row[-1]][index] += 1
+            return t
+
+        external_edges = self[-1][self.num_internal_edges:]
+        residual_info = np.array(list( zip(  range(len(external_edges)), external_edges*-1, self.species_vector if self.species_vector is not None else [0 for i in range(len(external_edges))])))
+        if sort: residual_info=residual_info[residual_info[:,-1].argsort()]
+        if exiting == False:residual_info=residual_info[residual_info[:,1] != -1]
+        if entering == False:residual_info=residual_info[residual_info[:,1] !=  1]
+        return residual_info if not as_tensor else _residual_tensor_(residual_info)
+
+
+    def vedges(self, voffset=0):
+        """
+        This coverts all edges into [v,w] and it is smart enough to treat v_infty
+        Also, if we want to choose an ID offset for vertices when naming them, it is convenient to do so here
+        """
+        vinfty = self.shape[0] -1
+
+        for e in self.T:
+            f,t = np.where(e==EXITING)[0][0],np.where(e==ENTERING)[0][0]
+            if f == vinfty:f=-1
+            else: f = f+voffset
+            if t == vinfty:t=-1   
+            else: t = t+ voffset
+            yield [f,t]
+
     @property
     def _internal_edge_set_(self):return internal_edge_set(self)
         
     def ensure_edge_directions(self,d):
         """Supply a dictoinary with edge id and vertex e.g. { 0: [1,2]} means edge 0 takes vertex 1 to vertex 2"""
-        for k,v in d.items():self[:,k][v[0]],self[:,k][v[1]] = 1, -1
+        for k,v in d.items():self[:,k][v[0]],self[:,k][v[1]] = EXITING,ENTERING
         
     def flip_edges(self,edge_indecies):
         if not isinstance(edge_indecies,list): edge_indecies =[edge_indecies]
@@ -121,24 +209,68 @@ class incidence_matrix(np.ndarray):
     
     def get_all_connections(self,a,b):
         for i,r in enumerate(self.T):
-            if(r[a]==1) and (r[b]==-1):yield i, 1
-            if(r[a]==-1) and (r[b]==1):yield i, -1
+            if(r[a]==ENTERING) and (r[b]==EXITING):yield i, ENTERING
+            if(r[a]==EXITING) and (r[b]==ENTERING):yield i, EXITING
             
     def try_directed_edge_index(self,a,b):
         """
-        checks all the columns (edges) to see if there is an edge that starts at a(1) and ends at b(-1)
+        I think I should reverse this - postive end should be arriving
+        checks all the columns (edges) to see if there is an edge that starts at a(-1) and ends at b(1)
         """
         for i,r in enumerate(self.T):
-            if(r[a]==1) and (r[b]==-1):
+            if(r[a]==EXITING) and (r[b]==ENTERING):
                 return i
         return None
     
     def exists_directed_edge(self,a,b):
         return self.try_directed_edge_index != None
+
+    #dont override these on a class that overrides ndarray - crazy!
+    #def __mul__(self, B):
+    #    return self.dprod(B)
+    #def __rmul__(self, B):
+    #    return self.dprod(B)
     
+    def dprod(self, B, species_chord_set):
+        #get my ins
+        #todo figure out a maximal chord set if nothing passed in
+        inputs = self.residual(exiting=False)
+        outputs = B.residual(entering=False)
+        ind,outd = {},{}
+        for i in inputs:
+            if i[-1] not in ind: ind[i[-1]] = [] #check species type
+            ind[i[-1]].append(i[0]) #add eid to correct species
+
+        for i in outputs:
+            if i[-1] not in outd: outd[i[-1]] = [] #check species type
+            outd[i[-1]].append(i[0]) #add eid to correct species
+
+        #return ind,outd
+        bs = []
+        for i,bonds in enumerate(species_chord_set): #this is a tuple e.g. (2,0,1) for species A,B,C in the theory
+            for b in range(bonds):
+                bs.append([ind[i].pop(), outd[i].pop()])
+
+        all_my_edges = list(self.vedges())
+        num_my_vertices =  self.shape[0]-1
+        all_their_edges= list(B.vedges(voffset=num_my_vertices))
+
+        #then we must determine what target is on our edge and what target is on their edge and make new
+
+        new_edges = []
+        for b in bs:
+            re = all_my_edges.pop(b[0])
+            le = all_their_edges.pop(b[1])
+            new_edges.append([le[0], re[-1]])
+
+        new_edges = all_my_edges + all_their_edges + new_edges
+        return incidence_matrix(edges=new_edges)
+
     @property
     def cycle_basis(self): return cycle_finder(self.edges).cycle_basis
     
+    #this is a bit problematic, I have not decided on the best conv. unclude or exclude external by default?
+
     @property
     def edges(self): return [self.directed_edge_as_vertices(e) for e in range(self._num_internal_edges)]
         
@@ -175,7 +307,7 @@ class incidence_matrix(np.ndarray):
         
     def add_edges(self, eset):
         for i, v in enumerate(eset): 
-            self[v[0],i],self[v[1],i] = 1,-1
+            self[v[0],i],self[v[1],i] = EXITING,ENTERING
             
             
     @property
@@ -314,8 +446,8 @@ class incidence_matrix(np.ndarray):
         the edge goes from cell marked 1 to cell marked -1
         """
         e = self[:,e]
-        return [np.where(e==1)[0][0],np.where(e==-1)[0][0]]
-            
+        return [np.where(e==EXITING)[0][0],np.where(e==ENTERING)[0][0]]
+    
         
     def __sample__():
         return incidence_matrix(9, 6,

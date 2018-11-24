@@ -59,14 +59,15 @@ class pole_descriptor(object):
 #this guy is solid but to signs in omegas. The cycle basis MUST produce the correct edge bases and also signs used for omegas
 class scalar_propagator(object):
     def __init__(self, loop_basis, ex_edge_basis, index=0, species="a",  power=1):
-        species_variable = lambda name : Symbol(name+"_"+species)
+        species_variable = lambda name : Symbol(name+"_"+species) if species != None else  Symbol(name)
         self._index = index
         self._species = species
         self._power = power
         k_vars = [ abs(v) * k_var(i) for i,v in enumerate(loop_basis)] + [ abs(v) * k_var(i,True) for i,v in enumerate(ex_edge_basis)]
         o_vars = [ v * omega_var(i) for i,v in enumerate(loop_basis)]  + [ v * omega_var(i,True) for i,v in enumerate(ex_edge_basis)]
 
-        self._core =  _sum_(o_vars)+species_variable("D")*(_sum_(k_vars)**2) +species_variable("m")**2
+        self._core =  _sum_(o_vars)+species_variable("D")*(_sum_(k_vars)**2)
+        if species != None: self._core = self._core +species_variable("m")**2
                     
         self._den = self._core**power
                 
