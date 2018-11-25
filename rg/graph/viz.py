@@ -71,6 +71,21 @@ class arc(object):
         
         return """<path {} d="{}" stroke="{}"  stroke-width="2px" {} {} {}/>""".format(pidattr, d,self.colour, decorations, transfrm, dasharray) 
     
+    @staticmethod
+    def __describeArc_PTS__(start, end, radius=50, colour="black", pid=None,_is_cut_line=True):
+
+        wrap,sweepFlag = (0,0) #if endAngle < startAngle  else (0,1)
+        largeArcFlag = "0" #if endAngle - startAngle <= 180 else "1"
+        #print(startAngle+wrap,endAngle+wrap, largeArcFlag, sweepFlag)
+        d = [  "M", start[0], start[1], "A", radius, radius, 0, largeArcFlag, sweepFlag, end[0], end[1]  ]
+        d = " ".join([str(_d)+" " for _d  in d] )   
+        transfrm =  ""#  """transform="rotate(180, {}, {}) scale(1, -1) translate(0, -150)" """.format(*self.center) if self.change_sense else ""
+        pidattr = "" if pid == None else """id='edge{}'""".format(pid)
+        
+        dasharray = "" if not _is_cut_line else """stroke-dasharray='1,5' """
+        
+        return """<path {} d="{}" stroke="{}"  stroke-width="2px" {}{}/>""".format(pidattr, d,colour, transfrm, dasharray) 
+    
     def __repr__(self):return self.header + self.body
     
     def _repr_html_(self): 
@@ -168,16 +183,16 @@ class ring_diagram(object):
                    is_cut_line=(pid in self._dashed_edges),colour=colour,is_directed=self._is_directed).body    
   
         
-    def get_line(self, pts, dash_array=None,pid=None):
+    def get_line(self, pts, dash_array="",pid=None, colour=None):
         
-        colour = self.edge_colour(pid)
+        colour = self.edge_colour(pid) if colour == None else colour
         
         #todo hash array passed in is redundant remove
         
         midpoint = [(pts[0] + pts[2])/2.,(pts[1] + pts[3])/2.]            
         #l = """<line x1="{0}" y1="{1}" x2="{2}" y2="{3}" stroke="{4}" stroke-width:2px"  {5}   />""".format(*pts, colour,dash_array )
         pidattr = "" if pid == None else """id='edge{}'""".format(pid)
-        dasharray =  "" if pid not in self._dashed_edges else """stroke-dasharray='1,7'"""
+        dasharray =  dash_array if pid not in self._dashed_edges else """stroke-dasharray='1,7'"""
         hl =""
         l = """<path d="M{0} {1} L {2} {3}" stroke="{4}" stroke-width="2px" {5} {6}  /> """.format(*pts, colour,pidattr,dasharray )
         #print(l)
@@ -347,21 +362,29 @@ class show_spanning_trees(object):
     def _repr_html_(self): return self.body
     
 class star(ring_diagram):
-    def __init__(self, inc,vroot=0, options={}):
+    def __init__(self, inc, options={}):
         self.root = (0,0)
         self._inc = inc
         self.body = ""
         self.radius = 35
         self._dashed_edges = []
+        self._all_points = [[0,0]]
         self._is_directed = True
         self._vertex_depths = [0]
         self.x = 0
         self.y = 0
-        self._size=(300,150) if "size" not in options else options["size"]
-        self.star_svg(vroot, center=(50,50))
+        self._size=(10,10) if "size" not in options else options["size"]
+        
+        vroot = inc.root_vertex()
+        
+        self.star_svg(vroot, center=(0,0))
         self._options= options
         
+        
     def star_svg(self,vid,center,pid=None):
+        marker_style = arc.get_header()
+        self.body += marker_style
+        
         v_pseudo_residual = self._inc.get_star(vid)
         entering = v_pseudo_residual[v_pseudo_residual[:,1]==1]
         exiting =  v_pseudo_residual[v_pseudo_residual[:,1]==-1]
@@ -373,6 +396,7 @@ class star(ring_diagram):
             pt = self.__polarToCartesian__(angle, self.radius,center)[:2]
             self.body +=self.get_line(pt+center,pid=e)        
             #print("entering", pt, "ang", angle)
+            self.update_bounds(pt)
 
         for i, e in enumerate(exiting[:,0]):
             pie_size = 180./(len(exiting)+1)
@@ -380,16 +404,17 @@ class star(ring_diagram):
             pt = self.__polarToCartesian__(angle, self.radius,center)[:2]    
             self.update_bounds(pt)
             self.body +=self.get_line(center+pt,pid=e)
-            #print("exiting", pt, "ang", angle)
             #if there is an internal v at the of e, then render that do
             ch = exiting[i][-1]
             if ch != -1:
+                
                 cpt = self.__polarToCartesian__(angle, 2*self.radius,center)[:2]
+                self.update_bounds(cpt)
                 self.star_svg(ch, center=cpt)
                 
     #todo for dynamic diagrams, we should determine the size and center: center used for rotos
-    def update_bounds(self,pt):
-        pass
+    def update_bounds(self,pt): 
+        self._all_points.append(pt)
     
     #[0,15,20, 45, (60), 90] -> [0,15,20, 45, (58), 90]
     #[0,2,4,pid,3,1] - > [1,0,2,4,pid,3]
@@ -401,14 +426,135 @@ class star(ring_diagram):
     #def __get_star_children__(S):  return S[S[:,1]==-1]
         
     def __display__(self):
+        padding = 50
+        pts = np.array(self._all_points)
+        x1,x2 = pts[:,0].min(),  pts[:,0].max()
+        y1,y2 = pts[:,1].min(),  pts[:,1].max()
+
+        self._size = (abs(x1-x2)+padding, abs(y1-y2)+padding)        
+        self._center = (self._size[0]/2. ,self._size[1]/2. -padding/2.)
+        trans = "translate({} {})".format(self._size[0]/2.,padding)
         rotation = 90 if "extra_rotation" not in self._options else 90 + self._options["extra_rotation"]
+        rotation = 0 # test abs
+        
         fstring = """<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" x="{1}" y="{2}" width="{3}" height="{4}">
-      <g fill="none" stroke="black" stroke-width="1.6" stroke-linecap="round" transform="rotate({5},{6},{7})"> {0}  </g> </svg>"""
-        return fstring.format(self.body,  self.x, self.y,*self._size,rotation, self._size[0]/2.,self._size[0]/2.)
+      <g fill="none" stroke="black" stroke-width="1.6" stroke-linecap="round" transform="rotate({5},{6},{7}) {8} "> {0}  </g> </svg>"""
+        return fstring.format(self.body,  self.x, self.y,*self._size, rotation, *self._center, trans)
     
         return self.body
+
+
+# i think the debug grahp is fairly flexi. For one loops we can sort in a ring. for trees we can sort in a spine maybe in terms of out end points or bifuricate
+class debug_graph(ring_diagram):
+    def __init__(self, inc, options={}):
+        self.root = (0,0)
+        self._inc = inc
+        self.body = ""
+        self.radius = 35
+        self._dashed_edges = [-1]
+        self._all_points = [[0,0]]
+        self._is_directed = True
+        self._vertex_depths = [0]
+        self.x = 0
+        self.y = 0
+        self._size=(500,250) if "size" not in options else options["size"]
+        self._options= options
+        self.rotation = 0
+        self._center= (self._size[0]/2.,self._size[1]/2.)
         
+        self.update_body()
         
+    def update_body(self):
+        marker_style = arc.get_header()
+        self.body += marker_style
+        vw = 100
+        vinfty = self._inc.shape[0] - 1
+        internals = vinfty - 1
+        vs = {}
+        vs_lu = {}
+        w = vinfty * 100
+        
+        if "hide_vinfty" not in self._options:
+            self.body+= """<circle cx="{0}" cy="{1}" r="2.5" stroke="grey" stroke-width="2" fill="black" /> """.format(w/2., 30)
+                        
+        offset = vw/2.
+        for i, v in enumerate(self._inc[:-1]):
+            x = offset + vw*i
+            y = 100
+            vs[i] = [x,y]
+            self.body+= """<circle cx="{0}" cy="{1}" r="2.5" stroke="black" stroke-width="2" fill="black" /> """.format(x,y)
+            
+            vs_lu[i] = {}
+            
+            center = tuple(vs[i])
+            v_pseudo_residual = self._inc.get_star(i)
+            entering = v_pseudo_residual[v_pseudo_residual[:,1]==1]
+            exiting =  v_pseudo_residual[v_pseudo_residual[:,1]==-1]
+
+            for j, e in enumerate(entering[:,0]):
+                pie_size = 180./(len(entering)+1)
+                angle = 90+((j)*pie_size)
+                pt = self.__polarToCartesian__(angle, self.radius,center)[:2]
+                vs_lu[i][e] = pt
+                self.body +=self.get_line(pt+center,pid=e)        
+
+            for j, e in enumerate(exiting[:,0]):
+                pie_size = 180./(len(exiting)+1)
+                angle = 270+((j)*pie_size)
+                pt = self.__polarToCartesian__(angle, self.radius,center)[:2]  
+                vs_lu[i][e] = pt
+                self.body +=self.get_line(center+pt,pid=e)
+
+        #for all the edges create a midway point between the two vs and a directed circuit accorss them using dotted lines?
+        for i, e in enumerate(self._inc.T):
+            #add edge coords and for each vertex, for each edge, say where it ends
+            try:
+                ed = np.nonzero(e)[0]
+                edge = e[ed]
+                a,b = tuple(ed) if edge[0] == -1 else tuple(reversed(ed))        
+                pa,pb = vs_lu[a][i],vs_lu[b][i] 
+
+                if a < b: #do arc instead
+                    ar = arc.__describeArc_PTS__(pa,pb,pid=-1,colour="grey")
+                    self.body += ar
+                else:
+                    self.body +=self.get_line(( *pa,*pb ) ,colour="grey", dash_array="""stroke-dasharray='1,7'""" )
+            except Exception as ex:
+                #print(repr(ex))      
+                pass
+    def __display__(self):
+        fstring = """<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" x="{1}" y="{2}" width="{3}" height="{4}">
+      <g fill="none" stroke="black" stroke-width="1.6" stroke-linecap="round" transform="rotate({5},{6},{7}) "> {0}  </g> </svg>"""
+        return fstring.format(self.body,  self.x, self.y, *self._size, self.rotation, *self._center)
+        return self.body
+    
+class tabulate_graphs(object):
+
+    def __init__(self, collection,  max_width=None, min_split=3, max_split=7, alternate_background=False, diagram_class=debug_graph, options={}):
+        l = int(np.ceil(np.sqrt(len(collection))))
+        width,height = l,l
+        if width < min_split: width,height=len(collection),1
+        if width > max_split: width,height = max_split,  int(np.ceil(len(collection)/max_split))
+        style = "" if alternate_background == True and height > 1 else "style='background:white'"
+        
+        rows = ""
+        counter = 0
+        for i in range(height):
+            row = """<tr {}>""".format(style)
+            for j in range(width):
+                if counter < len(collection):
+                    rd = diagram_class(collection[counter], options=options)
+                    row+="""<td>{}</td>""".format(rd.__display__() )
+                counter+=1
+            row+= "</tr>"
+            rows+= row
+                
+        self.body = """<table >{}</table>""".format(rows)
+        
+    def _repr_html_(self): return self.body
+
+    
+    
 #class melon_graph(ring_diagram):
 #    def __init__(self,left_angles = [], right_angles =[], mids = []):
 #        self.x = 10

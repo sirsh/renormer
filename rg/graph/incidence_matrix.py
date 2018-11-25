@@ -6,10 +6,13 @@
 #implement edge sets by wrapping set and overloading /set notation
 
 #temp: later pick your objects - just is just to prototype
+
+#list of cruicial operations: covertex is the hard one (e, dir, colour)
 from sympy import *
 
 import operator
 import functools
+import itertools
 import math
 import pandas as pd
 import numpy as np
@@ -110,17 +113,71 @@ class incidence_matrix(np.ndarray):
         obj._internal_vertices = list(set(list(range(vertex_count))) - set(external_vertices))
         
         obj._kmatrix = obj.kirchhoff
-        obj._betti_1 = obj._kmatrix.degree()#~ whats the relatioship?
+        #take any spanning tree of which there must be one
+        obj._betti_1 = 0
+        if len(obj.spanning_trees) > 0:
+            #edge compl gives Psi and the order of each monomial gives the loop number
+            obj._betti_1 = obj._num_internal_edges - len(obj.spanning_trees.iloc[0].values) 
 
-        obj.species_vector = species_vector
+        obj.species_vector = species_vector if species_vector != None else [0 for i in range(edge_count)]
         
         return obj
     
+  
     #add external edge and internal edges sets for convenience
-    
+  
+    @property
+    def  bridge_count(self):
+        """
+        need to check if a proper defintion or there is not something cleaner, but if we find edges in all spanning trees
+        then these are bridges
+        """
+        trees = self.spanning_trees
+        mask = np.zeros((len(trees),self.shape[-1]),np.int)
+        for i, r in enumerate(trees.as_matrix()):  mask[i][r] = 1
+        mask_tot = mask.sum(axis=0)
+        return len(np.where(mask_tot == len(trees))[0])
+
     @property #the last row determines if the edge is connected to vinty i.e. external
     def num_internal_edges(self):len(np.where(self[-1] == 0)[0])
+       
+    def __mul_hash__(self,use_full_vertex=True):
+        vals = []
         
+        flat = lambda l : tuple(list(l.sum(axis=0).flatten()))
+        
+        all_stars = list(self.stars)
+        for i,r in enumerate(all_stars):
+            for j, v in enumerate(r[:-1]):
+                IN = v[:,-1]
+                if np.sum(IN) > 0: 
+                    #the decodated residual in the species IO basis is the key
+                    if use_full_vertex: k = ( flat(all_stars[i]) , flat(all_stars[j]),tuple(IN))
+                    else: k = (i,j,tuple(IN) )
+                    if k not in vals: vals.append( k )
+        #if the set is empty, just return myself and the void mull
+        if len(vals) == 0: return set([(flat(all_stars[0]))])
+        return set(vals)
+    
+    @property
+    def stars(self):
+        """v1: This constructs all information for vertices 
+               The external vertex is labelled dim max, then we construct a tensor that contains IO for each species, and a slab for each adjacent vertex
+               This allows a summation in z to give the full vertex information but also we can reconsturct the muls
+        """
+        species = self.species_vector if self.species_vector is not None else list([0 for i in range(self.shape[-1])])
+        sn = len(np.unique(species))  
+        num_vertices = self.shape[0]
+        for i, v in enumerate(self[:-1]):
+            tense = np.zeros((num_vertices,sn,2),np.int)
+            for e,edge in enumerate(self.T):
+                if edge[i] == 0: continue
+                IO = 0 if edge[i] == -1 else 1
+                vs = np.where(edge!=0)[0] #some edge data
+                cov = vs[vs!= i][0] #the vertex that is not me
+                tense[cov][species[e]][IO] += 1     
+            yield tense
+      
     #for testing it would be good to return this in incidence matrix format 
     def get_star(self,vid):
         star_links = {}
@@ -169,7 +226,7 @@ class incidence_matrix(np.ndarray):
                 t[row[-1]][index] += 1
             return t
 
-        external_edges = self[-1][self.num_internal_edges:]
+        external_edges = self[-1][np.nonzero(self[-1])[0]]
         residual_info = np.array(list( zip(  range(len(external_edges)), external_edges*-1, self.species_vector if self.species_vector is not None else [0 for i in range(len(external_edges))])))
         if sort: residual_info=residual_info[residual_info[:,-1].argsort()]
         if exiting == False:residual_info=residual_info[residual_info[:,1] != -1]
@@ -225,17 +282,49 @@ class incidence_matrix(np.ndarray):
     def exists_directed_edge(self,a,b):
         return self.try_directed_edge_index != None
 
+    ###useful for trees where there is a distinguished root vertex
+    def root_vertex(self):
+        #incomding edges
+        def _check_covertex_for_in_edges_(v):
+            v_infty = self.shape[0] - 1
+            edges = np.where(self[v]==1)[0]
+            #all covertices of incoming edges
+            return [v for v in np.unique(np.where(self.T[edges].T == -1)[0]) if v != v_infty] 
+        for i, v in enumerate(self):
+            l = _check_covertex_for_in_edges_(i)
+            if len(l) == 0: return i
+        
     #dont override these on a class that overrides ndarray - crazy!
     #def __mul__(self, B):
     #    return self.dprod(B)
     #def __rmul__(self, B):
     #    return self.dprod(B)
     
+    #I may implement a graft shuffle product but as a generator it is not well defined 
+    #this is because there are inaccessible graphs e.g. those that require trasmutation
+    #if we can not rely on it as a complete product then it is only a nice-to-have
+    
+    @staticmethod
+    def shuffle(A,B,allow_split=False):
+        """
+        return tuples of size species count (n,m,..) for a mul: how many chords to join
+        """
+        def _complete_marriage_tensor_(A,B):
+            rt = A.residual(as_tensor=True)
+            lt = B.residual(as_tensor=True)
+            return np.minimum(rt[:,-1], lt[:,0])
+
+        sets = [list(range(s+1)) for s in _complete_marriage_tensor_(A,B)]
+
+        return list(itertools.product(*sets))
+
+    
     def dprod(self, B, species_chord_set):
         #get my ins
         #todo figure out a maximal chord set if nothing passed in
         inputs = self.residual(exiting=False)
         outputs = B.residual(entering=False)
+        
         ind,outd = {},{}
         for i in inputs:
             if i[-1] not in ind: ind[i[-1]] = [] #check species type
@@ -248,23 +337,44 @@ class incidence_matrix(np.ndarray):
         #return ind,outd
         bs = []
         for i,bonds in enumerate(species_chord_set): #this is a tuple e.g. (2,0,1) for species A,B,C in the theory
-            for b in range(bonds):
-                bs.append([ind[i].pop(), outd[i].pop()])
-
+            for b in range(bonds): bs.append([ind[i].pop(), outd[i].pop()])
+        #print(bs)
+        
         all_my_edges = list(self.vedges())
         num_my_vertices =  self.shape[0]-1
         all_their_edges= list(B.vedges(voffset=num_my_vertices))
-
-        #then we must determine what target is on our edge and what target is on their edge and make new
-
+        my_edge_species = self.species_vector
+        their_edge_species = B.species_vector
+        
+        #print(their_edge_species,"before")
         new_edges = []
+        new_edges_species = []
         for b in bs:
-            re = all_my_edges.pop(b[0])
-            le = all_their_edges.pop(b[1])
-            new_edges.append([le[0], re[-1]])
-
+            le = all_my_edges[b[0]]
+            re = all_their_edges[b[1]]
+            new_edges.append([re[0], le[-1]]) #from right to left
+            new_edges_species.append(my_edge_species[b[0]])
+        
+        #filter by what we have merged
+        #print(all_their_edges)
+        
+        all_my_edges = [all_my_edges[e] for e in range(len(all_my_edges)) if e not in list(np.array(bs)[:,0])]
+        my_edge_species = [my_edge_species[e] for e in range(len(my_edge_species)) if e not in list(np.array(bs)[:,0])]
+        
+        all_their_edges = [all_their_edges[e] for e in range(len(all_their_edges)) if e not in list(np.array(bs)[:,1])]
+        their_edge_species = [their_edge_species[e] for e in range(len(their_edge_species)) if e not in list(np.array(bs)[:,1])]
+        #print(all_their_edges)
+        
         new_edges = all_my_edges + all_their_edges + new_edges
-        return incidence_matrix(edges=new_edges)
+        new_edges_species = my_edge_species + their_edge_species + new_edges_species
+  
+        #print(their_edge_species,"after")
+        #print("check speciation lengths", len(new_edges),len(new_edges_species))
+        #print("check speciation lengths", len(all_my_edges),len(my_edge_species))
+        #print("check speciation lengths", len(all_their_edges),len(their_edge_species))
+
+        
+        return incidence_matrix(edges=new_edges,species_vector=new_edges_species)
 
     @property
     def cycle_basis(self): return cycle_finder(self.edges).cycle_basis
