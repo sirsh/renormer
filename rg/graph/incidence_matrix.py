@@ -104,28 +104,32 @@ class incidence_matrix(np.ndarray):
         
         #build
         obj = super(incidence_matrix, self).__new__(self, size, np.int)  
+        obj._species_vector = species_vector if species_vector != None else [0 for i in range(edge_count)]
         obj[:] = 0 
-        obj._num_internal_edges = len(internal_edges)
-        
+        obj._num_internal_edges = len(internal_edges)     
         obj.add_edges(edges)
-        
         obj._external_vertices = external_vertices
         obj._internal_vertices = list(set(list(range(vertex_count))) - set(external_vertices))
-        
         obj._kmatrix = obj.kirchhoff
-        #take any spanning tree of which there must be one
-        obj._betti_1 = 0
-        if len(obj.spanning_trees) > 0:
-            #edge compl gives Psi and the order of each monomial gives the loop number
-            obj._betti_1 = obj._num_internal_edges - len(obj.spanning_trees.iloc[0].values) 
-
-        obj.species_vector = species_vector if species_vector != None else [0 for i in range(edge_count)]
-        
+        obj._betti_1 = 0  
+        obj.is_tree = obj._num_internal_edges == vertex_count - 1
+        if len(obj.spanning_trees)  > 0 and not obj.is_tree:
+                #order = obj._kmatrix.degree() - 1
+                p = obj.kirchhoff.coeff_monomial(Symbol("z"))
+                #K gives the edges IN the tree and we want the number of cuts which gives the loop number
+                obj._betti_1 = obj._num_internal_edges - len(p.as_ordered_terms()[0].free_symbols)
+       
         return obj
-    
-  
+     
     #add external edge and internal edges sets for convenience
   
+    #def __eq__(self, b):return self.graph_hash() == b.graph_hash()
+    #def __hash__(self):  return hash(self.graph_hash() ) 
+    
+    @property
+    def species_vector(self):
+        try: return self._species_vector
+        except: return False
     @property
     def  bridge_count(self):
         """
@@ -138,17 +142,38 @@ class incidence_matrix(np.ndarray):
         mask_tot = mask.sum(axis=0)
         return len(np.where(mask_tot == len(trees))[0])
 
+    @property
+    def num_ex_edges(self): return len(np.where(self[-1]!=0)[0] )
+    
     @property #the last row determines if the edge is connected to vinty i.e. external
     def num_internal_edges(self):len(np.where(self[-1] == 0)[0])
-       
-    def __mul_hash__(self,use_full_vertex=True):
+    
+    def graph_hash(self, to_string=True):
+        spec = np.array(self.species_vector) + 1
+        iedges = self
+        def pred(row):return len(np.where(row == 1)[0]) + len(np.where(row == -1)[0])*100
+        sel = np.apply_along_axis(pred, 1, iedges)
+        h = np.matmul(iedges[np.argsort(sel)], np.diag(spec))
+        return h if not to_string else str(h.flatten())
+
+    
+    def loop_hash(self, to_string=True):
+        eidx = np.where(self[-1]==0)[0]
+        spec = np.array(self.species_vector)[eidx] + 1
+        iedges = self.T[eidx].T[:-1]
+        def pred(row):return len(np.where(row == 1)[0]) + len(np.where(row == -1)[0])*100
+        sel = np.apply_along_axis(pred, 1, iedges)
+        h = np.matmul(iedges[np.argsort(sel)], np.diag(spec))
+        return h if not to_string else str(h.flatten())
+
+    def __mul_hash__(self,use_full_vertex=True,ignore_residue=False):
         vals = []
         
         flat = lambda l : tuple(list(l.sum(axis=0).flatten()))
         
-        all_stars = list(self.stars)
+        all_stars = list(self.stars)# [s if ignore_residue else s[np.where(s[:,-1]!=-1)[0]] for s in ]
         for i,r in enumerate(all_stars):
-            for j, v in enumerate(r[:-1]):
+            for j, v in enumerate(r[:-1]):   
                 IN = v[:,-1]
                 if np.sum(IN) > 0: 
                     #the decodated residual in the species IO basis is the key
@@ -233,6 +258,27 @@ class incidence_matrix(np.ndarray):
         if entering == False:residual_info=residual_info[residual_info[:,1] !=  1]
         return residual_info if not as_tensor else _residual_tensor_(residual_info)
 
+    @property
+    def loop_part(self):
+        edges = np.array([self.directed_edge_as_vertices(e) for e in range(self.shape[-1])])
+        iedges = np.where(self[-1]==0)[0] 
+        spec = list(np.array(self.species_vector)[iedges])
+        return incidence_matrix(edges=edges[iedges], species_vector=spec)
+
+    @property
+    def residue_part(self):
+        vinf = self.shape[0] - 1
+        def map_inf(e):
+            #because this is a resodie there can only be two vertices
+            return [
+                0 if e[0] != vinf else -1,
+                0 if e[1] != vinf else -1,
+            ]   
+        edges = np.array([map_inf(self.directed_edge_as_vertices(e)) for e in range(self.shape[-1])])
+        iedges = np.where(self[-1]!=0)[0] 
+        #remove internal lvertices
+        spec = list(np.array(self.species_vector)[iedges])
+        return incidence_matrix(edges=edges[iedges], species_vector=spec)
 
     def vedges(self, voffset=0):
         """
@@ -285,14 +331,15 @@ class incidence_matrix(np.ndarray):
     ###useful for trees where there is a distinguished root vertex
     def root_vertex(self):
         #incomding edges
+        v_infty = self.shape[0] - 1
         def _check_covertex_for_in_edges_(v):
-            v_infty = self.shape[0] - 1
+            
             edges = np.where(self[v]==1)[0]
             #all covertices of incoming edges
             return [v for v in np.unique(np.where(self.T[edges].T == -1)[0]) if v != v_infty] 
         for i, v in enumerate(self):
             l = _check_covertex_for_in_edges_(i)
-            if len(l) == 0: return i
+            if len(l) == 0 and i != v_infty: return i
         
     #dont override these on a class that overrides ndarray - crazy!
     #def __mul__(self, B):
@@ -390,6 +437,10 @@ class incidence_matrix(np.ndarray):
     @property
     def external_vertices (self):return self._external_vertices
     
+    @property
+    def internal_edges(self):return list(np.where(self[-1])[0])
+        
+    
     def get_coincident_vertices_any(self, vset,exclusions = []):
         items = []
         for v in vset:
@@ -479,7 +530,10 @@ class incidence_matrix(np.ndarray):
     def edge_labels(self):
         #the last row is the external vertex so check which edges are connected
         ex_edges = np.nonzero(self[-1])[0]
-        return [ "p"+str(i) for i in range(self.shape[-1]) if i not in ex_edges]   +   [ "q"+str(i) for i in range(len(ex_edges))]
+        ex_edge_labels = [ "q"+str(i) for i in range(len(ex_edges))]
+        labels = np.array(  [ "p"+str(i) for i in range(self.shape[-1]) ]   )
+        labels[ex_edges] =  ex_edge_labels
+        return list(labels)
        
     @property
     def vertex_constraints(self,display=False):
@@ -501,9 +555,13 @@ class incidence_matrix(np.ndarray):
     @property
     def symbol_adjacency(self):pass
     
-    def __sym_i_cofactor__(mat,r=-1,c=-1):
+    def __sym_i_cofactor__(self, mat,r=-1,c=-1):
         """remove ith row and ith column"""
         temp = Matrix(mat)
+    
+        #internal_edges = self.internal_edges
+        #return temp[internal_edges,internal_edges]
+    
         if r==-1: r = temp.shape[0]-1
         if c==-1: c = temp.shape[1]-1
         temp.col_del(c)
@@ -519,15 +577,24 @@ class incidence_matrix(np.ndarray):
         return [Symbol("q"+str(i)) for i in range(len(ex_edges))]
     
     @property
-    def kirchhoff(self):
+    def reduced_lap(self):
         #get the laplacian
-        L = self.edge_label_matrix * self.edge_label_matrix.T
+        el = self.edge_label_matrix
+        
+        L = el * el.T
         #scale the terms because of the way we did it
         for s in self._internal_symbols_(): L=L.subs({s**2:s})
         #treat all external edges as z so we can get a polynomial in z for forest order
         for s in self._external_symbols_(): L=L.subs({s**2:Symbol("z")}) 
         #take the reduced laplacian
-        reduced =  incidence_matrix.__sym_i_cofactor__(L)  
+        return  self.__sym_i_cofactor__(L)  
+    
+    @property
+    def kirchhoff(self):
+        #if we only have one vertex then there is nothing to do
+        if self.shape[0] == 2: return  Poly(0, Symbol("z"))
+
+        reduced = self.reduced_lap
         #solve determinant
         P= reduced.det(method='berkowitz')
         #make it pretty
@@ -539,14 +606,16 @@ class incidence_matrix(np.ndarray):
     def first_betti_number(self): return self._betti_1
     
     @property
-    def spanning_trees(self): return pd.DataFrame(self.k_forests(-1))
+    def spanning_trees(self): return pd.DataFrame(self.k_forests(1))
     
     def k_forests(self, order): 
-        p = self._kmatrix.coeffs()[order]
-        #this must be considered temporary - one thing might be to use symbols that evaluate to useful things instead of bare symbols
-        for monomials in p.as_ordered_terms(): 
-            edges = [int(str(e).replace("p","")) for e in monomials.free_symbols]
-            yield edges
+        #hack - i messed up my symbols
+        if self.kirchhoff != 0:
+            p = self.kirchhoff.coeff_monomial(Symbol("z")**order)
+            #this must be considered temporary - one thing might be to use symbols that evaluate to useful things instead of bare symbols
+            for monomials in p.as_ordered_terms(): 
+                edges = [int(str(e).replace("p","")) for e in monomials.free_symbols]
+                yield edges
             
     def edge_complement(self,edges):
         return list(set(range(len(self.edges))) - set(edges))
@@ -612,9 +681,9 @@ class incidence_matrix(np.ndarray):
         #todo finish second polynomaisl which is U*mass_sum + sum of forests multiplied by the momentum across the cut edges
         delta_functions = internal_edge_set(self).X_delta
         
-        first = [self.edge_complement(k) for k in self.k_forests(order=-1)]
+        first = [self.edge_complement(k) for k in self.k_forests(order=1)]
         #needs to have at least three vertices for this to make sense - otherwise no way to disconect the vertices and still keep an edge
-        second = [self.edge_complement(k) for k in self.k_forests(order=-2)]
+        second = [self.edge_complement(k) for k in self.k_forests(order=2)]
         
         to_alpha_symbols = lambda l : [Symbol("alpha_"+str(i)) for i in l]
         

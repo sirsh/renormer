@@ -173,7 +173,8 @@ class ring_diagram(object):
             try:
                 if self._inc.species_vector is not None and len(self._inc.species_vector) > pid and self._inc.species_vector[pid] < len(colours):
                     return  colours[self._inc.species_vector[pid]]
-            except:
+            except Exception as ex:
+                print(repr(ex))
                 return "black"
         return "black"
     
@@ -407,7 +408,6 @@ class star(ring_diagram):
             #if there is an internal v at the of e, then render that do
             ch = exiting[i][-1]
             if ch != -1:
-                
                 cpt = self.__polarToCartesian__(angle, 2*self.radius,center)[:2]
                 self.update_bounds(cpt)
                 self.star_svg(ch, center=cpt)
@@ -527,6 +527,75 @@ class debug_graph(ring_diagram):
       <g fill="none" stroke="black" stroke-width="1.6" stroke-linecap="round" transform="rotate({5},{6},{7}) "> {0}  </g> </svg>"""
         return fstring.format(self.body,  self.x, self.y, *self._size, self.rotation, *self._center)
         return self.body
+
+class simple_ring_graph(ring_diagram):
+    """
+    example
+    B = incidence_matrix(edges= [ [-1,3], [-1,3],[3,0],[3,1],[-1,1],[1,2],[2,0],[0,-1]],  species_vector=[0,1,0,1,0,0,0,0])
+    """
+    def __init__(self,inc, options={}):
+        self.body=""
+        self._dashed_edges = []
+        self._is_directed=True
+        self.sz = inc.shape[0] - 1
+        self._center = (100,100)
+        self._size = (200,200)
+        self._radius=50
+        self.locations = []
+        self._inc = inc
+
+        locs = [0,180]
+        if self.sz == 3:locs = [0,90,180]
+        if self.sz == 4:locs = [0,45,135,180]
+        
+        for v in range(self.sz):
+            s= inc.get_star(v)
+            ex,ex_dirs = [],[]
+            e = -1
+            try:
+                e = s[np.where(s[:,1]==-1)[0]][0][0]
+            except:
+                #if this happens it is because it is not a proper ring but I need to fix how the drawing is done
+                e = s[np.where(s[:,1]==1)[0]][0][0]
+                
+            if len(np.where(s[:,-1]==-1)[0]) > 0:#if has externals added the data
+                ex = list(s[np.where(s[:,-1]==-1)[0]][:,0])
+                ex_dirs = list(s[np.where(s[:,-1]==-1)[0]][:,1])   
+            self.locations.append([locs[v], e, ex,ex_dirs])
+                                
+            #print(self.locations)
+          
+    def star_at(self, angle, out_edges=[], out_dirs = []):
+        pt= self.__polarToCartesian__(angle, self._radius, self._center) [:2] 
+        self.body+= """<circle cx="{0}" cy="{1}" r="2.5" stroke="black" stroke-width="2" fill="black" /> """.format(*pt)     
+        if len(out_edges) == 0:return
+        angles = [angle]
+        if len(out_edges) == 2: angles = [angle-20, angle+20]
+        if len(out_edges) == 3: angles = [angle-35, angle, angle+35]     
+        #print(angles,out_dirs)
+        for i, a in enumerate(angles):     
+            pta = self.__polarToCartesian__(a, 30, pt)[:2]
+            if out_dirs[i] == -1: self.body +=self.get_line((*pt, *pta ), pid=out_edges[i] )
+            else: self.body +=self.get_line((*pta, *pt ), pid=out_edges[i] )
+                
+    def __display__(self, ):            
+        marker_style = arc.get_header()
+        self.body += marker_style
+        loc = self.locations
+        for i, l in enumerate(loc):
+            nexti = (i + 1) % len(loc)
+            end = loc[nexti][0] if loc[nexti][0] != 0 else 360
+            if end == 360: 
+                self.body += self.__describeArc__( l[0],end, radius=self._radius, pid=l[1])
+            else:  self.body += self.__describeArc__(end,l[0],  radius=self._radius, pid=l[1])
+            self.star_at(l[0], l[-2], l[-1])
+        
+        rotation = -90
+        return  """<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" x="{1}" y="{2}" width="{3}" height="{4}">
+          <g fill="none" stroke="black" stroke-width="1.6" stroke-linecap="round" transform="rotate({5},100,100)"> {0}  </g> </svg>""".format(self.body,  10, 10, 200,200 ,rotation)
+    
+    def _repr_html_(self): return self.__display__()
+    
     
 class tabulate_graphs(object):
 
@@ -543,8 +612,12 @@ class tabulate_graphs(object):
             row = """<tr {}>""".format(style)
             for j in range(width):
                 if counter < len(collection):
-                    rd = diagram_class(collection[counter], options=options)
-                    row+="""<td>{}</td>""".format(rd.__display__() )
+                    cell_body = "ERROR AT " +str( counter )
+                    try:
+                        rd = diagram_class(collection[counter], options=options)
+                        cell_body = rd.__display__()
+                    except: pass
+                    row+="""<td>{}</td>""".format(cell_body )
                 counter+=1
             row+= "</tr>"
             rows+= row
