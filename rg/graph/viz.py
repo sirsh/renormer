@@ -547,24 +547,39 @@ class simple_ring_graph(ring_diagram):
         locs = [0,180]
         if self.sz == 3:locs = [0,90,180]
         if self.sz == 4:locs = [0,45,135,180]
-        
+            
+        #TODO sort incidence matrix so that one loop vertices form a chain
+        #this makes this very specific drawing utility a little more general
+
+        all_edges = list(inc.vedges())
+        V = inc.shape[0] - 2
+        a,b = 0,1
+        used_es = []
+               
         for v in range(self.sz):
             s= inc.get_star(v)
             ex,ex_dirs = [],[]
+            #determine the edge that connects me to the next vertex by an incoming
+            #if i am the last then determine the edge that goes from me to the first          
             e = -1
-            try:
-                e = s[np.where(s[:,1]==-1)[0]][0][0]
-            except:
-                #if this happens it is because it is not a proper ring but I need to fix how the drawing is done
-                e = s[np.where(s[:,1]==1)[0]][0][0]
-                
+
+            if v == 0:
+                e = np.where(inc[0]==1)[0][a]
+                if all_edges[e][0] == V:  
+                    a,b = b,a
+                    e = np.where(inc[0]==1)[0][a]
+            
+            elif v +1 < self.sz:#entering from the next _ I AM TRUSTING A VERTEX ORDERING HERE DUE TO PRODUCTS WHICH IS NOT GOOD IN GENERAL#(s[:,1]==1) & 
+                e = np.where(inc[v]==1)[0][0] #the first one arriving at the vertex     
+  
+            else:#leaving for the first - changing this from -1 because actuall i think it should be arriving#(s[:,1]==-1) & 
+                #print("v,e", v,e, "second case")
+                e = np.where(inc[0]==1)[0][b] #the second one arriving at the first vertex
             if len(np.where(s[:,-1]==-1)[0]) > 0:#if has externals added the data
                 ex = list(s[np.where(s[:,-1]==-1)[0]][:,0])
                 ex_dirs = list(s[np.where(s[:,-1]==-1)[0]][:,1])   
             self.locations.append([locs[v], e, ex,ex_dirs])
-                                
-            #print(self.locations)
-          
+        
     def star_at(self, angle, out_edges=[], out_dirs = []):
         pt= self.__polarToCartesian__(angle, self._radius, self._center) [:2] 
         self.body+= """<circle cx="{0}" cy="{1}" r="2.5" stroke="black" stroke-width="2" fill="black" /> """.format(*pt)     
@@ -596,6 +611,8 @@ class simple_ring_graph(ring_diagram):
     
     def _repr_html_(self): return self.__display__()
     
+#l = list(uniqueones.values())
+#simple_ring_graph( l[1] )
     
 class tabulate_graphs(object):
 

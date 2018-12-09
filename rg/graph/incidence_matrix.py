@@ -269,7 +269,7 @@ class incidence_matrix(np.ndarray):
     def residue_part(self):
         vinf = self.shape[0] - 1
         def map_inf(e):
-            #because this is a resodie there can only be two vertices
+            #because this is a residue there can only be two vertices
             return [
                 0 if e[0] != vinf else -1,
                 0 if e[1] != vinf else -1,
@@ -366,20 +366,24 @@ class incidence_matrix(np.ndarray):
         return list(itertools.product(*sets))
 
     
-    def dprod(self, B, species_chord_set):
+    def dprod(self, B, species_chord_set,outd=None, contract_tree_level=False):
         #get my ins
         #todo figure out a maximal chord set if nothing passed in
         inputs = self.residual(exiting=False)
         outputs = B.residual(entering=False)
         
-        ind,outd = {},{}
+        ind= {}
         for i in inputs:
             if i[-1] not in ind: ind[i[-1]] = [] #check species type
             ind[i[-1]].append(i[0]) #add eid to correct species
 
-        for i in outputs:
-            if i[-1] not in outd: outd[i[-1]] = [] #check species type
-            outd[i[-1]].append(i[0]) #add eid to correct species
+        #this allows us to choose specific edges for the chord set of the left hand side and pass it in. 
+        #this is useful for example to combine tree level radicals in specific ways
+        if outd == None:
+            outd = {}
+            for i in outputs:
+                if i[-1] not in outd: outd[i[-1]] = [] #check species type
+                outd[i[-1]].append(i[0]) #add eid to correct species
 
         #return ind,outd
         bs = []
@@ -418,10 +422,11 @@ class incidence_matrix(np.ndarray):
         #print(their_edge_species,"after")
         #print("check speciation lengths", len(new_edges),len(new_edges_species))
         #print("check speciation lengths", len(all_my_edges),len(my_edge_species))
-        #print("check speciation lengths", len(all_their_edges),len(their_edge_species))
-
+        #print("check speciation lengths", len(all_their_edges),len(their_edge_species))  
+        res = incidence_matrix(edges=new_edges,species_vector=new_edges_species)
         
-        return incidence_matrix(edges=new_edges,species_vector=new_edges_species)
+        #tree level we always contract the internal edges - only loops hold on to this information
+        return res.residue_part if res.is_tree and contract_tree_level else res
 
     @property
     def cycle_basis(self): return cycle_finder(self.edges).cycle_basis

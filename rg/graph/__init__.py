@@ -6,7 +6,7 @@ from .circuit import circuits,set_circuit_flow,set_source_sink_flow,apply_flow
 from .viz import show_spanning_trees, ring_diagram, star,arc, debug_graph, tabulate_graphs,simple_ring_graph
 from .propagators import scalar_propagator,pole_descriptor
 from . import circuit
-
+from . import perturbation 
 
 
 import os
@@ -25,7 +25,7 @@ def _edge_data_(self):
 
 def save_graph_collection(col, file):
     with open(file, "w") as f:
-        for s in sv: f.write(str(_edge_data_(s).tolist())+ os.linesep)
+        for s in col: f.write(str(_edge_data_(s).tolist())+ os.linesep)
 
 def _graph_from_saved_format_(l):
     l = np.array(l)
@@ -44,3 +44,21 @@ def load_graph_collection(file, as_inc_matrix=True):
                 if as_inc_matrix: l = _graph_from_saved_format_(l)
                 lst.append( l )
     return lst
+
+def convergent_diagrams_and_loops(col):
+    """
+    plot these with
+    
+    tabulate_graphs([loops[k]["graph"] for k in keys], diagram_class=simple_ring_graph)
+    
+    """
+    convergent_diags = [c for c in col if c.num_ex_edges < 5]
+    loops = {}
+    for c in convergent_diags:   
+        lh = c.loop_hash()
+        if lh not in loops: loops[lh] = { "graph" : c.loop_part, "counter" : 0 }
+        loops[lh]["counter"] += 1
+    
+    keys = list(loops.keys())   
+    
+    return convergent_diags, loops, keys
